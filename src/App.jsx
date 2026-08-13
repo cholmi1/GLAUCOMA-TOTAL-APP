@@ -443,7 +443,7 @@ const MEDS_INIT = [
 ];
 const SE_LOG_INIT = [
   { id: "e1", at: "2026-07-01 22:20", med: "잘타라노 점안액", eye: "od", items: ["결막 충혈"], severity: "경도", note: "점안 후 20분 정도 붉어짐" },
-  { id: "e2", at: "2026-06-24 08:10", med: "콤비간 점안액", eye: "both", items: ["따가움·자극감"], severity: "경도", note: "" },
+  { id: "e2", at: "2026-06-05 08:10", med: "콤비간 점안액", eye: "both", items: ["따가움·자극감", "가려움"], severity: "중등도", note: "점안 후 5분 정도 따갑고 가려움" },
 ];
 
 /* ============================================================
@@ -455,7 +455,18 @@ const SE_LOG_INIT = [
 const ADH_TARGET = 80;              // 순응도 목표(%)
 const LOG_DAYS = 120;               // 보관 기간
 /* 약제별 점안 성공 경향(데모용 시드) — 실제 서비스에서는 서버 기록을 그대로 사용 */
-const _MED_BIAS = { m1: 0.90, m2: 0.965, m3: 0.895 };
+const _MED_BIAS = { m1: 0.85, m2: 0.965, m3: 0.895 };
+const shiftDate = (iso, n) => { const d = new Date(iso); d.setDate(d.getDate() + n); return isoDate(d); };
+/* 부작용을 보고한 뒤 일정 기간 그 약제의 점안률이 떨어지는 현실을 반영 */
+function sePenalty(medName, iso) {
+  const ev = SE_LOG_INIT.filter((e) => e.med === medName && e.at.slice(0, 10) <= iso)
+    .sort((a, b) => a.at.localeCompare(b.at));
+  if (!ev.length) return 0;
+  const last = ev[ev.length - 1].at.slice(0, 10);
+  const gap = dayDiff(last, iso);
+  if (gap < 0 || gap > 28) return 0;
+  return +(0.30 * (1 - gap / 56)).toFixed(3);      // 직후 최대 30%p, 4주에 걸쳐 회복
+}
 function buildDoseLog(meds, days = LOG_DAYS) {
   const rows = [];
   const sched = meds.filter((m) => m.time !== "필요 시");
@@ -465,7 +476,7 @@ function buildDoseLog(meds, days = LOG_DAYS) {
     const dow = d.getDay();                                  // 0=일
     const weekendPenalty = dow === 0 || dow === 6 ? 0.06 : 0; // 주말에 조금 더 거름
     sched.forEach((m) => {
-      const base = (_MED_BIAS[m.id] != null ? _MED_BIAS[m.id] : 0.9) - weekendPenalty;
+      const base = (_MED_BIAS[m.id] != null ? _MED_BIAS[m.id] : 0.9) - weekendPenalty - sePenalty(m.name, iso);
       const eyes = m.eye === "both" ? ["od", "os"] : [m.eye];
       /* 하루 단위로 "그날 그 시간대를 통째로 걸렀는지"를 먼저 판정하고,
          걸르지 않은 날은 눈 단위로 한쪽만 빠뜨렸는지 따로 판정한다. */
@@ -533,6 +544,111 @@ function missStreak(to = TODAY_STR) {
   let n = 0;
   for (const d of days) { if (ADH_BY_DAY[d].pct < 100) n += 1; else break; }
   return n;
+}
+
+
+/* ============================================================
+   ★ 순응도 저하 원인 분석
+   부작용 기록 · 투약 시각 · 요일 · 좌우안 · 용법 복잡도 · 약병 상태를
+   실제 점안 기록과 대조해 "왜 거르는지"를 순위로 제시한다.
+   ============================================================ */
+function medWindowAdh(med, from, to) {
+  const rows = DOSE_LOG.filter((r) => r.med === med && r.date >= from && r.date <= to);
+  const taken = rows.filter((r) => r.taken).length;
+  return { total: rows.length, taken, pct: rows.length ? Math.round((taken / rows.length) * 100) : null };
+}
+/* 부작용 보고 전후 순응도 비교 */
+function seImpact(to = TODAY_STR, win = 14) {
+  return SE_LOG_INIT.map((e) => {
+    const d = e.at.slice(0, 10);
+    const before = medWindowAdh(e.med, shiftDate(d, -win), shiftDate(d, -1));
+    const after = medWindowAdh(e.med, d, to);
+    return { ...e, date: d, before, after, delta: before.pct != null && after.pct != null ? after.pct - before.pct : null };
+  }).filter((x) => x.delta != null && x.before.total >= 8 && x.after.total >= 8)
+    .sort((a, b) => a.delta - b.delta);
+}
+/* 원인 후보를 영향도(%p) 순으로 반환 */
+function rootCauses(from, to, meds = []) {
+  const all = overallAdherence(from, to);
+  const out = [];
+  if (!all.total) return { all, causes: [] };
+
+  seImpact(to).forEach((e) => {
+    if (e.delta > -3) return;
+    out.push({
+      key: "se-" + e.id, icon: AlertCircle, c: C.high, cat: "부작용",
+      title: `${e.med} 부작용 보고 이후 순응도 하락`,
+      detail: `${e.date} ${e.items.join(", ")}(${e.severity}) 기록 이후 ${e.before.pct}% → ${e.after.pct}%`,
+      impact: Math.abs(e.delta),
+      action: "보존제 무함유 제형이나 같은 계열 다른 성분으로 변경을 검토하세요.",
+      chart: { before: e.before, after: e.after, at: e.date },
+    });
+  });
+
+  const slots = adherenceBySlot(from, to);
+  if (slots.length > 1) {
+    const w = [...slots].sort((a, b) => a.pct - b.pct)[0];
+    const gap = all.pct - w.pct;
+    if (gap >= 3) out.push({
+      key: "slot", icon: Clock, c: C.mid, cat: "투약 시각",
+      title: `${w.key} 시각 점안을 자주 놓침`,
+      detail: `해당 시각 ${w.pct}% (${w.taken}/${w.total}회) · 전체 평균보다 ${gap}%p 낮음`,
+      impact: gap,
+      action: hmToMin(w.key) >= 1200 ? "취침 준비 루틴(양치·세면) 직후로 시각을 당겨 보세요." : "기상·식사 등 매일 반복되는 행동에 붙여 알림을 재설정하세요.",
+    });
+  }
+
+  const dows = adherenceByDow(from, to).filter((d) => d.pct != null);
+  if (dows.length) {
+    const w = [...dows].sort((a, b) => a.pct - b.pct)[0];
+    const gap = all.pct - w.pct;
+    if (gap >= 3) out.push({
+      key: "dow", icon: CalendarDays, c: C.mid, cat: "요일 패턴",
+      title: `${w.t}요일에 누락이 몰림`,
+      detail: `${w.t}요일 ${w.pct}% · 전체 평균보다 ${gap}%p 낮음`,
+      impact: gap,
+      action: "생활 리듬이 달라지는 요일입니다. 해당 요일만 알림을 한 번 더 받도록 설정하세요.",
+    });
+  }
+
+  const eyes = adherenceByEye(from, to);
+  if (eyes.length === 2) {
+    const [lo, hi] = [...eyes].sort((a, b) => a.pct - b.pct);
+    const gap = hi.pct - lo.pct;
+    if (gap >= 3) out.push({
+      key: "eye", icon: Eye, c: C.primary, cat: "좌·우안",
+      title: `${EYE_LABEL[lo.key]}만 빠뜨리는 패턴`,
+      detail: `${EYE_LABEL[lo.key]} ${lo.pct}% · ${EYE_LABEL[hi.key]} ${hi.pct}% (차이 ${gap}%p)`,
+      impact: gap,
+      action: "점안 자세나 손의 편의성 문제일 수 있습니다. 거울 앞에서 양안 순서를 고정해 연습하도록 안내하세요.",
+    });
+  }
+
+  const byMed = adherenceByMed(from, to);
+  if (byMed.length > 1) {
+    const w = byMed[0], b = byMed[byMed.length - 1];
+    const gap = b.pct - w.pct;
+    const src = meds.find((m) => m.name === w.key);
+    const daily = src ? (src.times || []).length : 0;
+    if (gap >= 5 && !out.some((o) => o.title.includes(w.key))) out.push({
+      key: "med", icon: Pill, c: C.gold, cat: "약제",
+      title: `${w.key} 순응도가 가장 낮음`,
+      detail: `${w.pct}% (${w.taken}/${w.total}회)${daily >= 2 ? ` · 1일 ${daily}회 용법` : ""} · 최고 약제와 ${gap}%p 차이`,
+      impact: gap,
+      action: daily >= 2 ? "복합제로 묶어 점안 횟수를 줄이는 방안을 검토하세요." : "해당 약제의 사용감·부작용을 먼저 확인하세요.",
+    });
+  }
+
+  const bot = bottleAlerts(meds);
+  if (bot.length) out.push({
+    key: "bottle", icon: Package, c: C.mid, cat: "약병",
+    title: "약병 상태가 점안을 방해할 수 있음",
+    detail: bot.map((x) => `${x.med.name}(${x.b.label})`).join(" · "),
+    impact: 2,
+    action: "폐기 예정일 전에 새 병을 준비하고, 일회용은 잔량 5개 이하일 때 리필을 요청하세요.",
+  });
+
+  return { all, causes: out.sort((a, b) => b.impact - a.impact) };
 }
 
 
@@ -894,6 +1010,63 @@ function Field({ label, children, req }) {
 }
 function ChoiceRow({ value, set, opts }) {
   return <div className="flex gap-2">{opts.map((o) => <button key={o} onClick={() => set(o)} className="cursor-pointer" style={{ flex: 1, border: `1.5px solid ${value === o ? C.primary : C.line}`, background: value === o ? C.mint : "#fff", color: value === o ? C.primary : C.sub, borderRadius: 10, padding: "8px 0", fontSize: 12.5, fontWeight: 700, fontFamily: FONT }}>{o}</button>)}</div>;
+}
+
+/* ---------- 순응도 저하 원인 분석 카드 ---------- */
+function CauseRank({ n }) {
+  const c = n === 1 ? C.high : n === 2 ? C.mid : C.sub;
+  return <span className="flex items-center justify-center flex-shrink-0" style={{ width: 20, height: 20, borderRadius: 6, background: c + "18", color: c, fontSize: 11, fontWeight: 800 }}>{n}</span>;
+}
+function BeforeAfterBar({ before, after, at }) {
+  const rows = [{ l: "이전 14일", v: before.pct, n: before.total, c: C.primary }, { l: "이후", v: after.pct, n: after.total, c: C.high }];
+  return (
+    <div style={{ marginTop: 9, padding: "10px 12px", borderRadius: 10, background: "#fff", border: `1px solid ${C.line}` }}>
+      <div style={{ fontSize: 10.5, color: C.sub, fontWeight: 700, marginBottom: 7 }}>부작용 보고({at}) 전후 순응도</div>
+      {rows.map((r) => (
+        <div key={r.l} className="flex items-center gap-2.5" style={{ marginBottom: 5 }}>
+          <span style={{ fontSize: 10.5, color: C.sub, width: 52, flexShrink: 0 }}>{r.l}</span>
+          <div style={{ flex: 1, height: 9, borderRadius: 99, background: C.mint, overflow: "hidden" }}>
+            <div style={{ width: `${r.v}%`, height: "100%", background: r.c, borderRadius: 99 }} />
+          </div>
+          <span style={{ fontSize: 11.5, fontWeight: 800, color: r.c, width: 34, textAlign: "right" }}>{r.v}%</span>
+          <span style={{ fontSize: 9.5, color: C.grey, width: 44, textAlign: "right" }}>{r.n}회</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+function CauseList({ causes, compact }) {
+  if (!causes.length) return (
+    <div className="flex flex-col items-center" style={{ padding: "26px 0", color: C.sub }}>
+      <Check size={20} color={C.low} />
+      <div style={{ fontSize: 12.5, marginTop: 7 }}>뚜렷한 누락 패턴이 발견되지 않았습니다.</div>
+    </div>
+  );
+  return (
+    <div className="flex flex-col gap-2.5">
+      {causes.slice(0, compact ? 3 : 6).map((x, i) => (
+        <div key={x.key} style={{ border: `1px solid ${C.line}`, borderRadius: 12, padding: "11px 13px" }}>
+          <div className="flex items-start gap-2.5">
+            <CauseRank n={i + 1} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5" style={{ flexWrap: "wrap" }}>
+                <x.icon size={13} color={x.c} />
+                <span style={{ fontSize: 10, fontWeight: 800, color: x.c, background: x.c + "16", padding: "1px 7px", borderRadius: 99 }}>{x.cat}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: C.ink }}>{x.title}</span>
+              </div>
+              <div style={{ fontSize: 11, color: C.sub, marginTop: 3, lineHeight: 1.45 }}>{x.detail}</div>
+            </div>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: x.c, flexShrink: 0 }}>−{x.impact}%p</span>
+          </div>
+          {x.chart && !compact && <BeforeAfterBar {...x.chart} />}
+          <div className="flex items-start gap-1.5" style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.line}` }}>
+            <Sparkles size={12} color={C.primary} className="flex-shrink-0" style={{ marginTop: 1 }} />
+            <span style={{ fontSize: 11, color: C.ink, lineHeight: 1.45 }}>{x.action}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 function Modal({ title, onClose, children, wide }) {
   return (
@@ -2238,6 +2411,7 @@ function DropsScreen({ meds, setMeds, seLog, setSeLog, nowMin, medUp, medOver, p
   const byEye = adherenceByEye(rangeFrom, rangeTo);
   const byDow = adherenceByDow(rangeFrom, rangeTo);
   const worstDow = byDow.filter((d) => d.pct != null).sort((a, b) => a.pct - b.pct)[0];
+  const { causes } = rootCauses(rangeFrom, rangeTo, meds);
   const missPts = pts.filter((p) => p.missed), okPts = pts.filter((p) => !p.missed);
   const gap = missPts.length && okPts.length
     ? (missPts.reduce((a, p) => a + p.odAvg, 0) / missPts.length - okPts.reduce((a, p) => a + p.odAvg, 0) / okPts.length).toFixed(1) : 0;
@@ -2418,6 +2592,19 @@ function DropsScreen({ meds, setMeds, seLog, setSeLog, nowMin, medUp, medOver, p
             <div className="flex items-center justify-center gap-3 flex-wrap" style={{ marginTop: 6 }}>
               <Legend c={C.od} t="우안" /><Legend c={C.os} t="좌안" /><Legend c={C.high} t="누락일" /><Legend c={C.mintDeep} t="순응도" />
             </div>
+          </Card>
+
+          <Card style={{ padding: 16 }}>
+            <SectionTitle icon={Search} right={<span style={{ fontSize: 11, color: C.sub }}>영향도 순</span>}>놓치는 이유 찾기</SectionTitle>
+            <div style={{ fontSize: 11.5, color: C.sub, lineHeight: 1.5, marginBottom: 11 }}>
+              실제 점안 기록과 부작용·시간대·요일 정보를 대조해 자주 거르는 이유를 찾았습니다.
+            </div>
+            <CauseList causes={causes} compact />
+            {causes.length > 0 && (
+              <div style={{ fontSize: 10.5, color: C.sub, marginTop: 11, lineHeight: 1.5, background: C.bg, borderRadius: 10, padding: "9px 11px" }}>
+                불편함 때문에 거르고 계시다면 참지 마시고 <b style={{ color: C.primary }}>부작용 기록</b>을 남겨 주세요. 같은 계열에서 다른 제형으로 바꾸면 나아지는 경우가 많습니다.
+              </div>
+            )}
           </Card>
 
           <Card style={{ padding: 16 }}>
@@ -3510,6 +3697,7 @@ function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend }) {
   const adhSlot = adherenceBySlot(rFrom, rTo);
   const adhEye = adherenceByEye(rFrom, rTo);
   const adhOf = (name) => { const f = adhMed.find((x) => x.key === name); return f || null; };
+  const { causes: adhCauses } = rootCauses(rFrom, rTo, MEDS_INIT);
   const TABS_D = [{ id: "iop", t: "안압" }, { id: "drops", t: "점안" }, { id: "survey", t: "문진·건강" }, { id: "device", t: "기기" }, { id: "profile", t: "프로필" }];
 
   return (
@@ -3636,6 +3824,27 @@ function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend }) {
               </div>
             </div>
           ))}
+
+          {/* 순응도 저하 원인 분석 */}
+          <div style={{ marginTop: 18 }}>
+            <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+              <div className="flex items-center gap-2">
+                <Search size={16} color={C.primary} />
+                <span style={{ fontSize: 13.5, fontWeight: 800, color: C.ink }}>순응도 저하 원인 분석</span>
+                <span style={{ fontSize: 11, color: C.sub }}>기록 {adhAll.total}회 대조 · 영향도 순</span>
+              </div>
+              {adhCauses.length > 0 && (
+                <span style={{ fontSize: 11, fontWeight: 800, color: C.high, background: C.highSoft, padding: "4px 11px", borderRadius: 99 }}>추정 원인 {adhCauses.length}건</span>
+              )}
+            </div>
+            <CauseList causes={adhCauses} />
+            {adhCauses.length > 0 && (
+              <div style={{ fontSize: 10.5, color: C.sub, marginTop: 11, lineHeight: 1.55, background: C.bg, borderRadius: 10, padding: "9px 11px" }}>
+                <b style={{ color: C.primary }}>해석 안내:</b> 인과관계 판정이 아니라 점안 기록·부작용 기록·시각·요일을 대조한 <b>연관성 제시</b>입니다.
+                표본이 적은 구간은 변동이 클 수 있으므로 진료 시 환자 설명과 함께 확인하세요.
+              </div>
+            )}
+          </div>
 
           <div className="grid grid-cols-2" style={{ gap: 16, marginTop: 18 }}>
             <div>
