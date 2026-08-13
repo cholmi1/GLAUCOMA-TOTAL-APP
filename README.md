@@ -126,7 +126,14 @@ Node.js 18 이상이 필요합니다.
 - **lucide-react** — 아이콘
 - **Tailwind CSS** (CDN) — 레이아웃 유틸리티
 
-현재 버전은 프런트엔드 프로토타입으로 모든 데이터가 클라이언트 상태로 관리됩니다. 백엔드 연동 시 필요한 서버 측 명세는 [`docs/notify-integration-spec.md`](docs/notify-integration-spec.md)를 참고하세요.
+현재 버전은 프런트엔드 프로토타입으로 모든 데이터가 클라이언트 상태로 관리됩니다. 서버 구현을 위한 설계 문서는 `docs/`에 있습니다.
+
+| 문서 | 내용 |
+|---|---|
+| [backend-architecture.md](docs/backend-architecture.md) | 시스템 구성, 테넌시, 인증·인가, 측정 수집, 국가별 규제, 보안, 배치 |
+| [db-schema.md](docs/db-schema.md) | PostgreSQL 스키마 DDL, ERD, 인덱스, 집계 전략, 보존 정책 |
+| [api-spec.md](docs/api-spec.md) | REST API 엔드포인트, 요청·응답 예시, 오류 코드, 레이트리밋 |
+| [notify-integration-spec.md](docs/notify-integration-spec.md) | 알림 스케줄러·발송 채널(FCM/APNs/SMS) 연동 |
 
 ---
 
@@ -137,7 +144,10 @@ Node.js 18 이상이 필요합니다.
 ├─ package.json
 ├─ vite.config.js
 ├─ docs/
-│  └─ notify-integration-spec.md   # 알림 스케줄러·발송 채널 연동 명세
+│  ├─ backend-architecture.md      # 백엔드 아키텍처
+│  ├─ db-schema.md                 # DB 스키마 (PostgreSQL)
+│  ├─ api-spec.md                  # REST API 명세
+│  └─ notify-integration-spec.md   # 알림 연동 명세
 └─ src/
    ├─ main.jsx
    ├─ index.css
