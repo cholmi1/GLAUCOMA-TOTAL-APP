@@ -10,7 +10,7 @@ import {
   Circle, Sunrise, Sun, Sunset, Moon, TrendingUp, Share2, ShieldCheck, Shield, Info, ListChecks,
   Search, Lock, LogIn, LogOut, KeyRound, Mail, Phone, Flag, Globe, Monitor, FileText, Download,
   Building2, PackageCheck, Undo2, Link2, Unlink, BatteryLow, WifiOff, MessageSquare, CheckCheck,
-  Timer, BellRing, Play, PhoneCall, ServerCog, Droplets, Droplet, ClipboardList, Watch, Footprints,
+  Timer, BellRing, Play, PhoneCall, ServerCog, History, Droplets, Droplet, ClipboardList, Watch, Footprints,
   HeartPulse, Coffee, Wine, Leaf, Wind, Bed, Dumbbell, Cigarette, Waves, Pill, Sparkles,
   CheckCircle2, QrCode, ScanLine, Beaker, CircleDot, ThermometerSun, Package,
 } from "lucide-react";
@@ -367,6 +367,167 @@ const MEDS_SAMPLE = [
 
 const WATCH = { device: "Galaxy Watch", steps: 6420, stepGoal: 8000, sleepH: 6, sleepM: 40, sleepQuality: "보통", hr: 72, irn: true, irnDate: "6/30" };
 const ALL_DRUGS = DRUG_LIB.flatMap((g) => g.items);
+
+/* ============================================================
+   ★ 의약품개요정보(e약은요) 연동
+   식품의약품안전처 공공데이터 · DrbEasyDrugInfoService
+   운영 시 EYAK_API.key 에 서비스키를 넣으면 실 API를 호출하고,
+   키가 없거나 호출이 실패하면 내장 데이터로 대체한다.
+   ============================================================ */
+const EYAK_API = {
+  base: "https://apis.data.go.kr/1471000/DrbEasyDrugInfoService/getDrbEasyDrugList",
+  key: "",                       // 공공데이터포털 발급 서비스키
+  rows: 20,
+};
+/* e약은요 응답 항목 정의 (실제 필드명과 동일) */
+const EYAK_FIELDS = [
+  { k: "efcyQesitm", t: "효능", icon: Sparkles },
+  { k: "useMethodQesitm", t: "사용법", icon: Droplet },
+  { k: "atpnWarnQesitm", t: "사용 전 확인", icon: AlertTriangle },
+  { k: "atpnQesitm", t: "사용상 주의사항", icon: Info },
+  { k: "intrcQesitm", t: "함께 주의할 약·음식", icon: Pill },
+  { k: "seQesitm", t: "이상반응", icon: AlertCircle },
+  { k: "depositMethodQesitm", t: "보관법", icon: Package },
+];
+/* 내장 데이터 (실 API 미연결 시 사용) */
+const EYAK_DB = [
+  { itemSeq: "200806148", itemName: "잘타라노점안액", entpName: "대우제약", ingr: "라타노프로스트", dose: "일회용", own: true,
+    efcyQesitm: "개방각녹내장과 고안압증 환자의 안압을 낮추는 데 사용합니다.",
+    useMethodQesitm: "보통 1일 1회, 저녁에 1회 1방울을 결막낭에 점안합니다. 정해진 시각을 지켜 사용하세요.",
+    atpnWarnQesitm: "이 약에 과민반응이 있는 환자, 콘택트렌즈 착용자는 사용 전 의사와 상의하세요.",
+    atpnQesitm: "홍채·눈꺼풀·속눈썹의 색이 진해지거나 속눈썹이 길어질 수 있으며, 일부는 되돌아오지 않을 수 있습니다.",
+    intrcQesitm: "다른 프로스타글란딘 계열 점안제와 병용 시 안압이 오히려 오를 수 있습니다.",
+    seQesitm: "결막 충혈, 눈 자극감, 시야 흐림, 눈꺼풀 색소침착이 나타날 수 있습니다.",
+    depositMethodQesitm: "개봉 전에는 2~8℃ 냉장 보관하고, 개봉 후에는 실온에서 4주 이내 사용하세요." },
+  { itemSeq: "199700481", itemName: "잘라탄점안액", entpName: "한국화이자제약", ingr: "라타노프로스트", dose: "다회용",
+    efcyQesitm: "개방각녹내장, 고안압증 환자의 상승된 안압을 낮춥니다.",
+    useMethodQesitm: "1일 1회 저녁에 1방울씩 점안합니다.",
+    atpnWarnQesitm: "임부·수유부, 무수정체안 환자는 사용 전 의사와 상의하세요.",
+    atpnQesitm: "황반부종이 보고된 바 있어 무수정체안·인공수정체안 환자는 주의가 필요합니다.",
+    intrcQesitm: "티몰롤 등 다른 안압하강제와 병용 시 5분 이상 간격을 두세요.",
+    seQesitm: "결막 충혈, 눈 통증, 홍채 색소침착이 나타날 수 있습니다.",
+    depositMethodQesitm: "개봉 전 냉장(2~8℃), 개봉 후 실온에서 4주 이내." },
+  { itemSeq: "201304563", itemName: "콤비간점안액", entpName: "한국애브비", ingr: "브리모니딘+티몰롤", dose: "다회용",
+    efcyQesitm: "베타차단제 단독요법으로 조절되지 않는 개방각녹내장·고안압증의 안압을 낮춥니다.",
+    useMethodQesitm: "1일 2회, 약 12시간 간격으로 1방울씩 점안합니다.",
+    atpnWarnQesitm: "천식·만성폐쇄성폐질환, 서맥·심부전 환자는 사용해서는 안 됩니다.",
+    atpnQesitm: "점안 후 눈 안쪽을 1~2분 눌러 전신 흡수를 줄이면 부작용을 낮출 수 있습니다.",
+    intrcQesitm: "혈압약·부정맥약과 함께 쓰면 서맥·저혈압이 심해질 수 있어 반드시 알리세요.",
+    seQesitm: "결막 충혈, 작열감, 입 마름, 졸음, 피로감이 나타날 수 있습니다.",
+    depositMethodQesitm: "실온(1~30℃)에서 보관하고 개봉 후 4주 이내 사용하세요." },
+  { itemSeq: "199602313", itemName: "티모프틱점안액", entpName: "한국엠에스디", ingr: "티몰롤", dose: "다회용",
+    efcyQesitm: "고안압증 및 개방각녹내장 환자의 안압을 낮춥니다.",
+    useMethodQesitm: "1일 2회 1방울씩 점안하며, 조절되면 1일 1회로 줄일 수 있습니다.",
+    atpnWarnQesitm: "기관지 천식, 서맥, 심부전 환자에게는 금기입니다.",
+    atpnQesitm: "당뇨 환자는 저혈당 증상이 가려질 수 있으므로 주의하세요.",
+    intrcQesitm: "칼슘길항제·베타차단제 경구제와 병용 시 심혈관 억제가 커질 수 있습니다.",
+    seQesitm: "눈 자극감, 서맥, 호흡곤란, 피로감이 나타날 수 있습니다.",
+    depositMethodQesitm: "실온 보관, 직사광선을 피하세요." },
+  { itemSeq: "200502547", itemName: "트루솝점안액", entpName: "한국엠에스디", ingr: "도르졸라미드", dose: "다회용",
+    efcyQesitm: "방수 생성을 줄여 개방각녹내장·고안압증의 안압을 낮춥니다.",
+    useMethodQesitm: "1일 3회 1방울씩 점안합니다. 다른 점안제와 병용 시 1일 2회로 조정할 수 있습니다.",
+    atpnWarnQesitm: "설파계 약물에 과민반응이 있었던 환자는 사용 전 알리세요.",
+    atpnQesitm: "중증 신장애 환자에게는 권장되지 않습니다.",
+    intrcQesitm: "경구 탄산탈수효소억제제와 병용은 권장되지 않습니다.",
+    seQesitm: "점안 후 쓴맛, 작열감, 일시적 시야 흐림이 나타날 수 있습니다.",
+    depositMethodQesitm: "실온 보관, 개봉 후 4주 이내 사용." },
+  { itemSeq: "200906723", itemName: "아좁트점안현탁액", entpName: "한국알콘", ingr: "브린졸라미드", dose: "다회용",
+    efcyQesitm: "개방각녹내장·고안압증 환자의 안압을 낮춥니다.",
+    useMethodQesitm: "사용 전 충분히 흔든 뒤 1일 2회 1방울씩 점안합니다.",
+    atpnWarnQesitm: "설파계 과민반응 병력이 있으면 사용 전 상의하세요.",
+    atpnQesitm: "현탁액이므로 반드시 흔들어 사용해야 약효가 균일합니다.",
+    intrcQesitm: "경구 탄산탈수효소억제제와 병용은 피하세요.",
+    seQesitm: "일시적 시야 흐림, 쓴맛, 눈 자극감이 나타날 수 있습니다.",
+    depositMethodQesitm: "실온 보관, 얼리지 마세요." },
+  { itemSeq: "201105512", itemName: "루미간점안액", entpName: "한국애브비", ingr: "비마토프로스트", dose: "다회용",
+    efcyQesitm: "개방각녹내장·고안압증 환자의 안압을 낮춥니다.",
+    useMethodQesitm: "1일 1회 저녁에 1방울씩 점안합니다. 1일 2회 이상 사용하면 효과가 떨어질 수 있습니다.",
+    atpnWarnQesitm: "포도막염·황반부종 병력이 있는 환자는 주의가 필요합니다.",
+    atpnQesitm: "속눈썹이 길어지고 짙어지며 눈 주위 피부색이 진해질 수 있습니다.",
+    intrcQesitm: "다른 프로스타글란딘 제제와 병용하지 마세요.",
+    seQesitm: "결막 충혈, 속눈썹 성장, 안구 건조감이 나타날 수 있습니다.",
+    depositMethodQesitm: "실온 보관, 개봉 후 4주 이내 사용." },
+  { itemSeq: "200712233", itemName: "알파간피점안액", entpName: "한국애브비", ingr: "브리모니딘", dose: "다회용",
+    efcyQesitm: "개방각녹내장·고안압증 환자의 안압을 낮춥니다.",
+    useMethodQesitm: "1일 3회 약 8시간 간격으로 1방울씩 점안합니다.",
+    atpnWarnQesitm: "영유아에게는 사용하지 않으며, MAO 억제제 복용자는 금기입니다.",
+    atpnQesitm: "졸음이나 어지러움이 있을 수 있어 운전 시 주의하세요.",
+    intrcQesitm: "진정제·알코올과 함께 쓰면 졸음이 심해질 수 있습니다.",
+    seQesitm: "알레르기성 결막염, 입 마름, 졸음이 나타날 수 있습니다.",
+    depositMethodQesitm: "실온 보관." },
+  { itemSeq: "201105230", itemName: "제티솝점안액", entpName: "대우제약", ingr: "도르졸라미드+티몰롤", dose: "다회용", own: true,
+    efcyQesitm: "단독요법으로 조절되지 않는 개방각녹내장·고안압증 환자의 안압을 낮춥니다.",
+    useMethodQesitm: "1일 2회, 1회 1방울씩 양쪽 눈에 점안합니다.",
+    atpnWarnQesitm: "기관지 천식, 서맥, 심부전 환자에게는 사용할 수 없습니다.",
+    atpnQesitm: "설파계 과민반응 병력이 있으면 사용 전 알리세요. 점안 후 눈 안쪽을 1~2분 눌러 주세요.",
+    intrcQesitm: "경구 베타차단제·칼슘길항제와 병용 시 서맥·저혈압이 심해질 수 있습니다.",
+    seQesitm: "쓴맛, 작열감, 결막 충혈, 일시적 시야 흐림이 나타날 수 있습니다.",
+    depositMethodQesitm: "실온 보관, 개봉 후 4주 이내 사용하세요." },
+  { itemSeq: "201703344", itemName: "히알산점안액", entpName: "대우제약", ingr: "히알루론산 0.1%", dose: "다회용", own: true,
+    efcyQesitm: "안구건조증 등으로 인한 각결막상피장애를 개선합니다.",
+    useMethodQesitm: "1회 1방울씩 1일 5~6회 점안하며 증상에 따라 조절합니다.",
+    atpnWarnQesitm: "점안 시 용기 끝이 눈에 닿지 않도록 하세요.",
+    atpnQesitm: "안압하강제와 함께 쓸 때는 5분 이상 간격을 두고 인공눈물을 나중에 넣으세요.",
+    intrcQesitm: "다른 점안제와 병용 시 간격을 두면 약효 손실을 줄일 수 있습니다.",
+    seQesitm: "드물게 가려움, 충혈, 이물감이 나타날 수 있습니다.",
+    depositMethodQesitm: "실온 보관, 개봉 후 4주 이내 사용하세요." },
+  { itemSeq: "200401182", itemName: "트라바탄점안액", entpName: "한국알콘", ingr: "트라보프로스트", dose: "다회용",
+    efcyQesitm: "개방각녹내장·고안압증 환자의 안압을 낮춥니다.",
+    useMethodQesitm: "1일 1회 저녁에 1방울씩 점안합니다.",
+    atpnWarnQesitm: "임부는 사용하지 않으며, 콘택트렌즈는 빼고 점안 후 15분 뒤 착용하세요.",
+    atpnQesitm: "홍채 색소침착과 속눈썹 변화가 나타날 수 있습니다.",
+    intrcQesitm: "다른 프로스타글란딘 제제와 병용하지 마세요.",
+    seQesitm: "결막 충혈, 눈 자극감, 시야 흐림이 나타날 수 있습니다.",
+    depositMethodQesitm: "실온 보관, 개봉 후 4주 이내 사용." },
+  { itemSeq: "201408811", itemName: "리안점안액", entpName: "삼일제약", ingr: "히알루론산 0.15%", dose: "일회용",
+    efcyQesitm: "쇼그렌증후군, 스티븐스존슨증후군, 안구건조증 등에서 각결막상피장애를 개선합니다.",
+    useMethodQesitm: "1회 1방울씩 1일 5~6회 점안하며 증상에 따라 조절합니다.",
+    atpnWarnQesitm: "일회용 제품은 개봉 후 즉시 사용하고 남은 약은 버리세요.",
+    atpnQesitm: "점안 후 시야가 흐려질 수 있으니 회복될 때까지 기다리세요.",
+    intrcQesitm: "다른 점안제와 병용 시 5분 이상 간격을 두세요.",
+    seQesitm: "드물게 눈꺼풀 염증, 가려움, 충혈이 나타날 수 있습니다.",
+    depositMethodQesitm: "실온 보관, 직사광선을 피하세요." },
+];
+/* 검색 없이 바로 고르는 대표 녹내장 안압약 */
+const QUICK_GROUPS = [
+  { label: "대우제약 제품", accent: true, seqs: ["200806148", "201105230", "201703344"] },
+  { label: "프로스타글란딘 계열", seqs: ["199700481", "201105512", "200401182"] },
+  { label: "베타차단제 · 복합제", seqs: ["201304563", "199602313"] },
+  { label: "탄산탈수효소억제제 · 알파작용제", seqs: ["200502547", "200906723", "200712233"] },
+  { label: "인공눈물", seqs: ["201408811"] },
+];
+const eyakBySeq = (seq) => EYAK_DB.find((d) => d.itemSeq === seq);
+
+/* 로컬 검색 — 제품명·성분·업체명 부분 일치 */
+function eyakLocalSearch(q) {
+  const k = (q || "").trim().toLowerCase();
+  if (!k) return [];
+  return EYAK_DB.filter((d) => [d.itemName, d.ingr, d.entpName].join(" ").toLowerCase().includes(k));
+}
+/* e약은요 조회 — 실 API 우선, 실패 시 내장 데이터 */
+async function searchEyak(q) {
+  const query = (q || "").trim();
+  if (!query) return { items: [], source: "none" };
+  if (!EYAK_API.key) return { items: eyakLocalSearch(query), source: "local" };
+  try {
+    const url = `${EYAK_API.base}?serviceKey=${EYAK_API.key}&itemName=${encodeURIComponent(query)}`
+      + `&pageNo=1&numOfRows=${EYAK_API.rows}&type=json`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(res.status);
+    const json = await res.json();
+    const raw = ((json.body && json.body.items) || []).map((it) => ({
+      itemSeq: it.itemSeq, itemName: it.itemName, entpName: it.entpName,
+      ingr: it.itemName, dose: "다회용", itemImage: it.itemImage,
+      efcyQesitm: it.efcyQesitm, useMethodQesitm: it.useMethodQesitm,
+      atpnWarnQesitm: it.atpnWarnQesitm, atpnQesitm: it.atpnQesitm,
+      intrcQesitm: it.intrcQesitm, seQesitm: it.seQesitm,
+      depositMethodQesitm: it.depositMethodQesitm,
+    }));
+    return { items: raw, source: "api" };
+  } catch (e) {
+    return { items: eyakLocalSearch(query), source: "local", error: true };
+  }
+}
 function drugDesc(ingr) {
   const map = {
     "라타노프로스트": "프로스타글란딘 유사체. 방수 유출을 늘려 안압을 낮춥니다. 보통 1일 1회 취침 전 점안.",
@@ -418,27 +579,39 @@ function bottleState(m, today = isoDate(new Date())) {
 /* 남은 용량(방울) 추정 — 다회용 5mL ≈ 100방울 기준 */
 const dropsLeft = (m) => (m.dose === "다회용" && m.dropsTotal ? Math.max(0, m.dropsTotal - (m.dropsUsed || 0)) : null);
 
+/* ---------- 점안 모니터링 기기 (블루투스) ----------
+   점안약 1개와 기기 1대를 1:1로 매칭한다. 매칭 후에는 기기1·기기2… 로 표시. */
+const DROP_DEVICES_INIT = [
+  { id: "DM-01", label: "기기1", serial: "CVTD-3301AA", model: "DropSense", battery: 78, rssi: -42, fw: "1.2.0", pairedTo: "m1", connected: true },
+  { id: "DM-02", label: "기기2", serial: "CVTD-3318BB", model: "DropSense", battery: 64, rssi: -55, fw: "1.2.0", pairedTo: "m2", connected: true },
+  { id: "DM-03", label: "기기3", serial: "CVTD-3327CC", model: "DropSense", battery: 91, rssi: -61, fw: "1.1.8", pairedTo: null, connected: false },
+  { id: "DM-04", label: "기기4", serial: "CVTD-3340DD", model: "DropSense Mini", battery: 45, rssi: -73, fw: "1.1.8", pairedTo: null, connected: false },
+];
+const medKey = (m) => m.linkOf || m.id;                       // 같은 약병을 쓰는 스케줄은 하나로 묶음
+const monitorOf = (devs, m) => devs.find((d) => d.pairedTo === medKey(m)) || null;
+const rssiBars = (r) => (r >= -50 ? 3 : r >= -65 ? 2 : 1);
+
 /* ---------- 오늘 점안 스케줄 (좌/우안 구분) ---------- */
 const MEDS_INIT = [
   {
     id: "m1", name: "잘타라노 점안액", ingr: "라타노프로스트", maker: "대우제약", dose: "일회용",
     eye: "both", time: "22:00", times: ["22:00"], freq: "1일 1회 · 취침 전", src: "manual",
-    taken: false, at: null, takenEye: {}, openedAt: null, unitsLeft: 4, rxFrom: "2026-06-03", rxBy: "이재훈",
+    taken: false, at: null, takenEye: {}, openedAt: null, unitsLeft: 4, rxFrom: "2026-06-03", rxBy: "이재훈", dropMode: "auto", itemSeq: "200806148", info: EYAK_DB[0],
   },
   {
     id: "m2", name: "콤비간 점안액", ingr: "브리모니딘+티몰롤", maker: "한국애브비", dose: "다회용",
     eye: "both", time: "08:00", times: ["08:00", "20:00"], freq: "1일 2회 · 08·20시", src: "device",
-    taken: true, at: "08:04", takenEye: { od: "08:04", os: "08:05" }, openedAt: "2026-06-08", dropsTotal: 100, dropsUsed: 78, rxFrom: "2026-06-03", rxBy: "이재훈",
+    taken: true, at: "08:04", takenEye: { od: "08:04", os: "08:05" }, openedAt: "2026-06-08", dropsTotal: 100, dropsUsed: 78, rxFrom: "2026-06-03", rxBy: "이재훈", dropMode: "auto",
   },
   {
     id: "m3", name: "콤비간 점안액", ingr: "브리모니딘+티몰롤", maker: "한국애브비", dose: "다회용",
     eye: "both", time: "20:00", times: ["08:00", "20:00"], freq: "1일 2회 · 08·20시", src: "device",
-    taken: false, at: null, takenEye: {}, openedAt: "2026-06-08", dropsTotal: 100, dropsUsed: 78, rxFrom: "2026-06-03", rxBy: "이재훈", linkOf: "m2",
+    taken: false, at: null, takenEye: {}, openedAt: "2026-06-08", dropsTotal: 100, dropsUsed: 78, rxFrom: "2026-06-03", rxBy: "이재훈", dropMode: "auto", linkOf: "m2",
   },
   {
     id: "m4", name: "리안점안액", ingr: "히알루론산 0.15%", maker: "삼일제약", dose: "일회용",
     eye: "both", time: "필요 시", times: [], freq: "필요 시", src: "manual",
-    taken: false, at: null, takenEye: {}, openedAt: null, unitsLeft: 22, rxFrom: "2026-06-03", rxBy: "이재훈",
+    taken: false, at: null, takenEye: {}, openedAt: null, unitsLeft: 22, rxFrom: "2026-06-03", rxBy: "이재훈", dropMode: "manual",
   },
 ];
 const SE_LOG_INIT = [
@@ -1012,6 +1185,129 @@ function ChoiceRow({ value, set, opts }) {
   return <div className="flex gap-2">{opts.map((o) => <button key={o} onClick={() => set(o)} className="cursor-pointer" style={{ flex: 1, border: `1.5px solid ${value === o ? C.primary : C.line}`, background: value === o ? C.mint : "#fff", color: value === o ? C.primary : C.sub, borderRadius: 10, padding: "8px 0", fontSize: 12.5, fontWeight: 700, fontFamily: FONT }}>{o}</button>)}</div>;
 }
 
+
+/* ---------- 블루투스 점안 모니터링 기기 배지 · 페어링 팝업 ---------- */
+function MonitorBadge({ dev, small }) {
+  if (!dev) return <span style={{ fontSize: small ? 9.5 : 10.5, fontWeight: 700, color: C.sub, background: "#EEF2F1", padding: "1px 7px", borderRadius: 99 }}>기기 미연결</span>;
+  return (
+    <span className="inline-flex items-center gap-1" style={{ fontSize: small ? 9.5 : 10.5, fontWeight: 800, color: dev.connected ? C.primary : C.sub, background: dev.connected ? C.mint : "#EEF2F1", padding: "1px 7px", borderRadius: 99 }}>
+      <span style={{ width: 5, height: 5, borderRadius: 99, background: dev.connected ? C.low : C.grey }} />
+      <Bluetooth size={small ? 9 : 10} /> {dev.label}
+    </span>
+  );
+}
+function SignalBars({ rssi }) {
+  const n = rssiBars(rssi);
+  return (
+    <span className="inline-flex items-end" style={{ gap: 1.5, height: 11 }}>
+      {[1, 2, 3].map((i) => <span key={i} style={{ width: 3, height: 3 + i * 3, borderRadius: 1, background: i <= n ? C.primary : C.line }} />)}
+    </span>
+  );
+}
+function BtPairModal({ med, devices, onClose, onPair, onUnpair }) {
+  const [scanning, setScanning] = useState(true);
+  const [found, setFound] = useState([]);
+  const [pairing, setPairing] = useState(null);
+  const [done, setDone] = useState(null);
+  const current = monitorOf(devices, med);
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setFound(devices.slice(0, 2)), 700);
+    const t2 = setTimeout(() => setFound(devices.slice(0, 3)), 1400);
+    const t3 = setTimeout(() => { setFound(devices); setScanning(false); }, 2100);
+    return () => [t1, t2, t3].forEach(clearTimeout);
+  }, [devices]);
+
+  const rescan = () => { setFound([]); setScanning(true); setTimeout(() => { setFound(devices); setScanning(false); }, 1600); };
+  const pick = (d) => {
+    if (d.pairedTo && d.pairedTo !== medKey(med)) return;
+    setPairing(d.id);
+    setTimeout(() => { onPair(d.id); setPairing(null); setDone(d); }, 1100);
+  };
+
+  return (
+    <Modal title="점안 모니터링 기기 연결" onClose={onClose}>
+      <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.5, marginBottom: 12 }}>
+        <b style={{ color: C.ink }}>{med.name}</b>에 사용할 기기를 선택하세요. 약 1개당 기기 1대만 연결됩니다.
+      </div>
+
+      {done ? (
+        <div className="flex flex-col items-center" style={{ padding: "14px 0 6px" }}>
+          <div className="flex items-center justify-center" style={{ width: 54, height: 54, borderRadius: 999, background: C.lowSoft, color: C.low, marginBottom: 12 }}><Check size={26} strokeWidth={3} /></div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>{done.label} 연결 완료</div>
+          <div style={{ fontSize: 11.5, color: C.sub, marginTop: 4, textAlign: "center", lineHeight: 1.5 }}>
+            이제 이 기기로 점안하면 <b style={{ color: C.primary }}>{med.name}</b> 기록이 자동으로 반영됩니다.
+          </div>
+          <div className="flex items-center gap-2" style={{ marginTop: 10, fontSize: 10.5, color: C.sub }}>
+            <span style={{ fontFamily: "monospace" }}>{done.serial}</span><span>·</span><span>배터리 {done.battery}%</span><span>·</span><span>FW {done.fw}</span>
+          </div>
+          <button onClick={onClose} className="cursor-pointer" style={{ width: "100%", border: "none", background: C.primary, color: "#fff", borderRadius: 12, padding: "12px 0", fontSize: 14, fontWeight: 800, fontFamily: FONT, marginTop: 18 }}>확인</button>
+        </div>
+      ) : (
+        <>
+          {current && (
+            <div className="flex items-center gap-2.5" style={{ padding: "10px 12px", borderRadius: 11, background: C.mint, marginBottom: 11 }}>
+              <Bluetooth size={15} color={C.primary} className="flex-shrink-0" />
+              <div className="flex-1">
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink }}>현재 연결 · {current.label}</div>
+                <div style={{ fontSize: 10.5, color: C.sub, fontFamily: "monospace" }}>{current.serial}</div>
+              </div>
+              <button onClick={() => { onUnpair(); onClose(); }} className="cursor-pointer flex items-center gap-1"
+                style={{ border: `1px solid ${C.high}45`, background: "#fff", color: C.high, borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 800, fontFamily: FONT }}><Unlink size={11} /> 연결 해제</button>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+            <span className="flex items-center gap-1.5" style={{ fontSize: 12, fontWeight: 800, color: C.ink }}>
+              {scanning ? <><RefreshCw size={12} color={C.primary} className="animate-spin" /> 주변 기기 검색 중…</> : <><Bluetooth size={12} color={C.primary} /> 검색된 기기 {found.length}대</>}
+            </span>
+            {!scanning && <span onClick={rescan} className="cursor-pointer flex items-center gap-1" style={{ fontSize: 11, fontWeight: 700, color: C.primary }}><RefreshCw size={11} /> 다시 검색</span>}
+          </div>
+
+          <div className="flex flex-col gap-2" style={{ minHeight: 150 }}>
+            {found.map((d) => {
+              const busy = d.pairedTo && d.pairedTo !== medKey(med);
+              const mine = d.pairedTo === medKey(med);
+              return (
+                <div key={d.id} onClick={() => !busy && pick(d)} className={busy ? "flex items-center gap-2.5" : "cursor-pointer flex items-center gap-2.5"}
+                  style={{ border: `1.5px solid ${mine ? C.primary : C.line}`, background: mine ? C.mint : busy ? C.bg : "#fff", borderRadius: 12, padding: "11px 13px", opacity: busy ? 0.6 : 1 }}>
+                  <div className="flex items-center justify-center flex-shrink-0" style={{ width: 34, height: 34, borderRadius: 11, background: mine ? "#fff" : C.mint, color: C.primary }}><Bluetooth size={17} /></div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span style={{ fontSize: 13, fontWeight: 800, color: C.ink }}>{d.label}</span>
+                      <span style={{ fontSize: 10, color: C.sub }}>{d.model}</span>
+                      {mine && <span style={{ fontSize: 9.5, fontWeight: 800, color: C.primary, background: "#fff", padding: "1px 7px", borderRadius: 99 }}>연결됨</span>}
+                      {busy && <span style={{ fontSize: 9.5, fontWeight: 800, color: C.sub, background: "#EEF2F1", padding: "1px 7px", borderRadius: 99 }}>다른 약에 연결됨</span>}
+                    </div>
+                    <div className="flex items-center gap-2" style={{ fontSize: 10, color: C.sub, marginTop: 2 }}>
+                      <span style={{ fontFamily: "monospace" }}>{d.serial}</span>
+                      <span>배터리 {d.battery}%</span>
+                      <SignalBars rssi={d.rssi} />
+                    </div>
+                  </div>
+                  {pairing === d.id
+                    ? <RefreshCw size={15} color={C.primary} className="animate-spin flex-shrink-0" />
+                    : !busy && <ChevronRight size={15} color={C.grey} className="flex-shrink-0" />}
+                </div>
+              );
+            })}
+            {scanning && found.length === 0 && (
+              <div className="flex flex-col items-center justify-center" style={{ padding: "34px 0", color: C.sub }}>
+                <Bluetooth size={22} color={C.mintDeep} />
+                <div style={{ fontSize: 12, marginTop: 8 }}>기기의 전원을 켜고 가까이 두세요.</div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ fontSize: 10.5, color: C.sub, marginTop: 12, lineHeight: 1.5, background: C.bg, borderRadius: 10, padding: "9px 11px" }}>
+            점안 모니터링 기기는 약병에 끼워 사용합니다. 점안이 감지되면 좌·우 구분과 시각이 앱으로 전송되어 자동 기록됩니다.
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 /* ---------- 순응도 저하 원인 분석 카드 ---------- */
 function CauseRank({ n }) {
   const c = n === 1 ? C.high : n === 2 ? C.mid : C.sub;
@@ -1301,7 +1597,7 @@ function FlucChart({ data, height = 130 }) {
         <ReferenceLine y={5} stroke={C.high} strokeDasharray="3 3" />
         <Tooltip contentStyle={{ borderRadius: 12, border: `1px solid ${C.line}`, fontSize: 12 }} formatter={(v) => [`${v} mmHg`, "일중 변동폭"]} />
         <Bar dataKey="fluc" radius={[3, 3, 0, 0]} barSize={12} isAnimationActive={false}>
-          {data.map((e, i) => <Cell key={i} fill={e.fluc >= 5 ? C.high : e.fluc >= 3.5 ? C.mid : C.primary} />)}
+          {data.map((e, i) => <Cell key={i} fill={e.fluc >= 5 ? C.high : e.fluc >= 2 ? C.mid : C.primary} />)}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
@@ -1593,124 +1889,222 @@ function AuthScreen({ onAuth }) {
 /* ============================================================
    안압 측정 패널 (좌/우안 선택)
    ============================================================ */
-function EyeCard({ id, label, sub, on, onClick }) {
+/* ============================================================
+   안압 측정 패널 — 기기 신호 기반
+   CVT200은 좌·우를 분리한 신호로 전송하므로 사전 선택 없이
+   수신되는 대로 해당 눈의 슬롯이 채워진다. 값은 수기 수정 가능.
+   ============================================================ */
+const ampm = (hm) => {
+  if (!hm) return "";
+  const [h, m, s] = hm.split(":").map(Number);
+  const ap = h < 12 ? "오전" : "오후";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${ap} ${_pad(h12)}:${_pad(m)}${s != null && !isNaN(s) ? ":" + _pad(s) : ""}`;
+};
+function EyeValueSlot({ eye, label, target, value, onChange, receivedAt, live, manual }) {
+  const [edit, setEdit] = useState(false);
+  const [buf, setBuf] = useState("");
+  const has = value != null;
+  const st = !has ? C.grey : value <= target ? C.low : value <= target + 3 ? C.mid : C.high;
+  const commit = (raw) => {
+    const v = parseFloat(raw);
+    onChange(isNaN(v) ? null : +Math.min(80, Math.max(1, v)).toFixed(1));
+  };
+  const editing = manual || edit;
   return (
-    <div onClick={onClick} className="cursor-pointer flex flex-col items-center"
-      style={{ flex: 1, border: `1.5px solid ${on ? C.primary : C.line}`, background: on ? C.mint : "#fff", borderRadius: 14, padding: "13px 8px" }}>
-      <div className="flex items-center justify-center" style={{ width: 38, height: 38, borderRadius: 12, background: on ? "#fff" : C.bg, color: on ? C.primary : C.sub, marginBottom: 6 }}>
-        {id === "both" ? <div className="flex" style={{ gap: 1 }}><Eye size={14} /><Eye size={14} /></div> : <Eye size={19} />}
+    <div style={{ border: `1.5px solid ${live ? C.primary : has ? st + "45" : C.line}`, borderRadius: 14, padding: "12px 14px", background: live ? C.mint : "#fff" }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: 5 }}>
+        <div className="flex items-center gap-1.5">
+          <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: eye === "od" ? C.od : C.os, padding: "2px 9px", borderRadius: 99 }}>{label}</span>
+          <span style={{ fontSize: 10, color: C.sub }}>목표 {target}</span>
+        </div>
+        {live ? (
+          <span className="flex items-center gap-1" style={{ fontSize: 10, fontWeight: 800, color: C.primary }}><RefreshCw size={10} className="animate-spin" /> 수신 중</span>
+        ) : manual ? (
+          <span style={{ fontSize: 10, fontWeight: 700, color: C.gold }}>수기 입력</span>
+        ) : edit ? (
+          <span onClick={() => setEdit(false)} className="cursor-pointer" style={{ fontSize: 10, fontWeight: 700, color: C.sub }}>완료</span>
+        ) : (
+          <span onClick={() => { setBuf(has ? String(value) : ""); setEdit(true); }} className="cursor-pointer flex items-center gap-1" style={{ fontSize: 10, fontWeight: 700, color: C.low }}>
+            <Sparkles size={10} /> 수기 수정
+          </span>
+        )}
       </div>
-      <div style={{ fontSize: 13, fontWeight: 800, color: on ? C.primary : C.ink }}>{label}</div>
-      <div style={{ fontSize: 10, color: C.sub, marginTop: 1 }}>{sub}</div>
+
+      {editing ? (
+        <input autoFocus={edit} type="number" step="0.1" min="1" max="80"
+          value={manual ? (has ? value : "") : buf}
+          onChange={(e) => { if (manual) commit(e.target.value); else setBuf(e.target.value); }}
+          onBlur={() => { if (!manual) { commit(buf); setEdit(false); } }}
+          onKeyDown={(e) => { if (e.key === "Enter" && !manual) { commit(buf); setEdit(false); } }}
+          placeholder="0"
+          style={{ ...inp, fontSize: 30, fontWeight: 800, textAlign: "center", padding: "4px 8px", color: has ? st : C.ink, fontVariantNumeric: "tabular-nums" }} />
+      ) : (
+        <div className="flex items-baseline justify-center gap-1.5" style={{ padding: "3px 0" }}>
+          <span style={{ fontSize: 38, fontWeight: 800, color: has ? st : C.mintDeep, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
+            {has ? value.toFixed(1) : "0"}
+          </span>
+          <span style={{ fontSize: 13, color: C.sub, fontWeight: 600 }}>mmHg</span>
+        </div>
+      )}
+
+      <div style={{ fontSize: 10.5, textAlign: "center", color: has ? st : C.grey, fontWeight: 600, marginTop: 3 }}>
+        {has ? (value > target ? `목표 +${(value - target).toFixed(1)} 초과` : "목표 이내")
+             : live ? "신호 수신 중" : manual ? "값을 입력하세요" : "대기 중"}
+        {receivedAt && !manual && <span style={{ color: C.sub, fontWeight: 500 }}> · {receivedAt}</span>}
+      </div>
     </div>
   );
 }
 function MeasurePanel({ onClose, onSave, targetOD, targetOS, baseOD }) {
-  const [eye, setEye] = useState("both");
-  const [mMode, setMMode] = useState("auto");
-  const [phase, setPhase] = useState(null);
-  const [pending, setPending] = useState(null);
-  const [mOD, setMOD] = useState(""); const [mOS, setMOS] = useState("");
-  const [mDate, setMDate] = useState(isoDate(new Date()));
-  const [mTime, setMTime] = useState(nowHM());
+  const now = new Date();
+  const [mDate, setMDate] = useState(isoDate(now));
+  const [mTime, setMTime] = useState(`${_pad(now.getHours())}:${_pad(now.getMinutes())}:${_pad(now.getSeconds())}`);
+  const [auto, setAuto] = useState(true);
+  const [live, setLive] = useState(null);
+  const [vals, setVals] = useState({ od: null, os: null });
+  const [recv, setRecv] = useState({ od: null, os: null });
+  const [log, setLog] = useState([]);
   const [ctx, setCtx] = useState("");
+  const [round, setRound] = useState(0);          // 재측정 시 증가
+  const timers = useRef([]);
   const CTX_OPTS = ["기상 직후", "점안 전", "점안 후", "운동 후", "저녁 식후", "취침 전"];
-  const noise = () => (Math.random() - 0.5) * 1.6;
+  const hasAny = vals.od != null || vals.os != null;
+  const bothDone = vals.od != null && vals.os != null;
 
-  const runAuto = () => {
-    const seq = eye === "both" ? ["od", "os"] : [eye];
-    const res = { od: null, os: null };
-    const step = (k) => {
-      if (k >= seq.length) { setPhase(null); setPending({ ...res, date: isoDate(new Date()), time: nowHM(), src: "auto", eye }); return; }
-      setPhase(seq[k]);
-      setTimeout(() => { res[seq[k]] = +((seq[k] === "od" ? baseOD : 15.4) + noise()).toFixed(1); step(k + 1); }, 1100);
-    };
-    step(0);
+  const clearAll = () => { timers.current.forEach(clearTimeout); timers.current = []; };
+  useEffect(() => () => clearAll(), []);
+
+  /* 자동측정 ON → 기기 신호를 계속 대기하다가 좌·우가 들어오는 대로 자동 반영.
+     실제 구현에서는 BLE characteristic notify 구독으로 대체한다. */
+  useEffect(() => {
+    clearAll();
+    setLive(null);
+    if (!auto) return;
+    const order = ["od", "os"].filter((e) => vals[e] == null);
+    if (!order.length) return;
+    const stamp = () => { const d = new Date(); return `${_pad(d.getHours())}:${_pad(d.getMinutes())}:${_pad(d.getSeconds())}`; };
+    order.forEach((eye, i) => {
+      timers.current.push(setTimeout(() => setLive(eye), 700 + i * 2100));
+      timers.current.push(setTimeout(() => {
+        const v = +((eye === "od" ? baseOD : 15.4) + (Math.random() - 0.5) * 1.6).toFixed(1);
+        const at = stamp();
+        setVals((o) => ({ ...o, [eye]: v }));
+        setRecv((o) => ({ ...o, [eye]: ampm(at) }));
+        setLog((l) => [{ eye, v, at: ampm(at), re: l.some((x) => x.eye === eye) }, ...l]);
+        setMTime(at);
+        setLive(null);
+      }, 1900 + i * 2100));
+    });
+    return clearAll;
+  }, [auto, round]);
+
+  const remeasure = () => { clearAll(); setVals({ od: null, os: null }); setRecv({ od: null, os: null }); setLive(null); setRound((r) => r + 1); };
+  const save = () => {
+    if (!hasAny) return;
+    const eye = bothDone ? "both" : vals.od != null ? "od" : "os";
+    onSave({ od: vals.od, os: vals.os, date: mDate, time: mTime.slice(0, 5), src: log.length ? "auto" : "manual", eye, ctx });
   };
-  const confirmManual = () => {
-    const od = eye === "os" ? null : parseFloat(mOD);
-    const os = eye === "od" ? null : parseFloat(mOS);
-    if ((eye !== "os" && isNaN(od)) || (eye !== "od" && isNaN(os))) return;
-    setPending({ od: od == null ? null : +od.toFixed(1), os: os == null ? null : +os.toFixed(1), date: mDate, time: mTime, src: "manual", eye });
-  };
-  const manualOK = (eye === "os" || mOD) && (eye === "od" || mOS);
 
   return (
-    <Card style={{ padding: 16, border: `1.5px solid ${C.mintDeep}` }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
-        <span style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>안압 측정</span>
+    <Card style={{ padding: 0, overflow: "hidden", border: `1.5px solid ${C.mintDeep}` }}>
+      <div className="flex items-center justify-between" style={{ padding: "13px 16px", borderBottom: `1px solid ${C.line}` }}>
+        <div className="flex items-center gap-2">
+          <Gauge size={17} color={C.primary} />
+          <span style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>안압 측정</span>
+        </div>
         <X size={20} color={C.sub} className="cursor-pointer" onClick={onClose} />
       </div>
-      {!pending && (
-        <>
-          <div style={{ fontSize: 12, fontWeight: 800, color: C.primary, marginBottom: 7 }}>① 측정할 눈을 선택하세요</div>
-          <div className="flex gap-2" style={{ marginBottom: 14 }}>
-            <EyeCard id="od" label="우안 OD" sub={`목표 ${targetOD}`} on={eye === "od"} onClick={() => setEye("od")} />
-            <EyeCard id="os" label="좌안 OS" sub={`목표 ${targetOS}`} on={eye === "os"} onClick={() => setEye("os")} />
-            <EyeCard id="both" label="양안" sub="우안 → 좌안" on={eye === "both"} onClick={() => setEye("both")} />
+
+      {/* 측정일 · 측정시간 */}
+      <div style={{ padding: "13px 16px", background: C.bg, borderBottom: `1px solid ${C.line}` }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 9 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: C.sub }}>측정일</span>
+          <input type="date" value={mDate} max={isoDate(new Date())} onChange={(e) => setMDate(e.target.value)}
+            style={{ ...inpSm, width: 158, textAlign: "center", fontWeight: 700 }} />
+        </div>
+        <div className="flex items-center justify-between">
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: C.sub, lineHeight: 1.35 }}>측정시간<br /><span style={{ fontSize: 10.5, fontWeight: 500 }}>(오전/오후 포함)</span></span>
+          <div className="flex flex-col items-end" style={{ gap: 3 }}>
+            <input type="time" step="1" value={mTime} onChange={(e) => setMTime(e.target.value)}
+              style={{ ...inpSm, width: 158, textAlign: "center", fontWeight: 700 }} />
+            <span style={{ fontSize: 11, fontWeight: 800, color: C.primary }}>{ampm(mTime)}</span>
           </div>
-          <div style={{ fontSize: 12, fontWeight: 800, color: C.primary, marginBottom: 7 }}>② 측정 방식</div>
-          <div className="flex" style={{ background: "#fff", borderRadius: 12, padding: 3, border: `1px solid ${C.line}`, marginBottom: 14 }}>
-            {[{ id: "auto", t: "자동 측정" }, { id: "manual", t: "수동 입력" }].map((m) => (
-              <button key={m.id} onClick={() => setMMode(m.id)} className="cursor-pointer" style={{ flex: 1, border: "none", borderRadius: 10, padding: "8px 0", fontSize: 13, fontWeight: 700, fontFamily: FONT, background: mMode === m.id ? C.mint : "transparent", color: mMode === m.id ? C.primary : C.sub }}>{m.t}</button>
-            ))}
-          </div>
-          {mMode === "auto" ? (
-            <div className="flex flex-col items-center" style={{ padding: "6px 0 4px" }}>
-              {phase ? (
-                <>
-                  <div className="flex items-center justify-center" style={{ width: 72, height: 72, borderRadius: 999, background: C.mint, marginBottom: 12 }}><RefreshCw size={34} color={C.primary} className="animate-spin" /></div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: C.primary }}>{phase === "od" ? "우안(OD)" : "좌안(OS)"} 측정 중…</div>
-                  <div style={{ fontSize: 11.5, color: C.sub, marginTop: 3 }}>CVT200을 {phase === "od" ? "오른쪽" : "왼쪽"} 눈에 맞추고 기다려 주세요.</div>
-                  {eye === "both" && (
-                    <div className="flex items-center gap-2" style={{ marginTop: 12 }}>
-                      {["od", "os"].map((e) => <span key={e} style={{ fontSize: 11, fontWeight: 800, padding: "4px 12px", borderRadius: 999, background: phase === e ? C.primary : C.mint, color: phase === e ? "#fff" : C.sub }}>{e === "od" ? "1. 우안" : "2. 좌안"}</span>)}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center justify-center" style={{ width: 72, height: 72, borderRadius: 999, background: C.mint, marginBottom: 12 }}><Gauge size={34} color={C.primary} /></div>
-                  <div style={{ fontSize: 12.5, color: C.sub, marginBottom: 14, textAlign: "center", lineHeight: 1.5 }}>
-                    <b style={{ color: C.primary }}>{EYE_LABEL[eye]}</b>{eye === "both" ? " (우안 먼저 측정 후 좌안)" : ""} 측정을 시작합니다.<br />CVT200을 준비한 뒤 아래 버튼을 누르세요.
-                  </div>
-                  <button onClick={runAuto} className="cursor-pointer" style={{ border: "none", borderRadius: 13, padding: "13px 30px", background: C.primary, color: "#fff", fontWeight: 800, fontSize: 14.5, fontFamily: FONT }}>{EYE_LABEL[eye]} 측정 시작</button>
-                </>
+        </div>
+      </div>
+
+      {/* 자동측정 토글 */}
+      <div className="flex items-center justify-between" style={{ padding: "11px 16px", borderBottom: `1px solid ${C.line}` }}>
+        <div className="flex items-center gap-2">
+          <Bluetooth size={14} color={auto ? C.primary : C.grey} />
+          <span style={{ fontSize: 13, fontWeight: 800, color: C.ink }}>자동측정</span>
+          <span style={{ fontSize: 10.5, color: auto ? C.primary : C.gold, fontWeight: 700 }}>
+            {auto ? (bothDone ? "측정 완료" : live ? `${live === "od" ? "우안" : "좌안"} 신호 수신 중` : "기기 신호 대기 중") : "수기 입력 모드"}
+          </span>
+        </div>
+        <div onClick={() => setAuto(!auto)} className="cursor-pointer flex items-center"
+          style={{ width: 46, height: 26, borderRadius: 99, background: auto ? C.primary : C.mintDeep, padding: 3, justifyContent: auto ? "flex-end" : "flex-start", transition: "all .15s" }}>
+          <span style={{ width: 20, height: 20, borderRadius: 99, background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.2)" }} />
+        </div>
+      </div>
+
+      {/* 현재 입력/측정치 */}
+      <div style={{ padding: "14px 16px" }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 800, color: C.ink }}>현재 입력/측정치</span>
+          {auto
+            ? <span className="flex items-center gap-1" style={{ fontSize: 11, fontWeight: 700, color: C.low }}><Sparkles size={11} /> 수기 수정 가능</span>
+            : <span className="flex items-center gap-1" style={{ fontSize: 11, fontWeight: 700, color: C.gold }}><Sparkles size={11} /> 좌·우 직접 입력</span>}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          <EyeValueSlot eye="od" label="우안 OD" target={targetOD} value={vals.od} live={live === "od"} receivedAt={recv.od} manual={!auto}
+            onChange={(v) => setVals((o) => ({ ...o, od: v }))} />
+          <EyeValueSlot eye="os" label="좌안 OS" target={targetOS} value={vals.os} live={live === "os"} receivedAt={recv.os} manual={!auto}
+            onChange={(v) => setVals((o) => ({ ...o, os: v }))} />
+        </div>
+
+        <div className="flex items-center justify-center gap-2" style={{ marginTop: 11 }}>
+          {auto ? (
+            <>
+              <span style={{ fontSize: 10.5, color: C.sub, lineHeight: 1.5, textAlign: "center" }}>
+                {bothDone ? "좌·우 측정이 모두 반영되었습니다. 값을 확인하고 저장하세요."
+                          : "CVT200을 눈에 맞추면 좌·우가 자동으로 구분되어 위 칸에 반영됩니다."}
+              </span>
+              {hasAny && (
+                <span onClick={remeasure} className="cursor-pointer flex items-center gap-1 flex-shrink-0" style={{ fontSize: 11, fontWeight: 800, color: C.primary }}>
+                  <RefreshCw size={11} /> 다시 측정
+                </span>
               )}
-            </div>
+            </>
           ) : (
-            <div className="flex flex-col gap-3">
-              <div className="flex gap-2.5">
-                {eye !== "os" && <Field label="우안 OD (mmHg)"><input type="number" step="0.1" min="5" max="50" value={mOD} onChange={(e) => setMOD(e.target.value)} placeholder="예: 17.2" style={inp} /></Field>}
-                {eye !== "od" && <Field label="좌안 OS (mmHg)"><input type="number" step="0.1" min="5" max="50" value={mOS} onChange={(e) => setMOS(e.target.value)} placeholder="예: 15.6" style={inp} /></Field>}
-              </div>
-              <div className="flex gap-2.5">
-                <Field label="측정 날짜"><input type="date" value={mDate} max={isoDate(new Date())} onChange={(e) => setMDate(e.target.value)} style={inp} /></Field>
-                <Field label="측정 시간"><input type="time" value={mTime} onChange={(e) => setMTime(e.target.value)} style={inp} /></Field>
-              </div>
-              <button onClick={confirmManual} disabled={!manualOK} className="cursor-pointer" style={{ border: "none", borderRadius: 13, padding: "13px 0", background: manualOK ? C.primary : C.mintDeep, color: "#fff", fontWeight: 800, fontSize: 14.5, fontFamily: FONT }}>입력값 확인</button>
-            </div>
+            <span style={{ fontSize: 10.5, color: C.sub, lineHeight: 1.5, textAlign: "center" }}>
+              병원에서 측정한 값이나 다른 기기의 값을 직접 기록합니다. 한쪽만 입력해도 저장됩니다.
+            </span>
           )}
-        </>
-      )}
-      {pending && (
-        <div className="flex flex-col gap-3">
-          <div style={{ fontSize: 12.5, color: C.sub, fontWeight: 700 }}>
-            {EYE_LABEL[pending.eye]} 측정 완료 · <span style={{ color: pending.src === "auto" ? C.primary : C.gold }}>{pending.src === "auto" ? "자동(CVT200)" : "수동 입력"}</span>
-          </div>
-          <div className={pending.eye === "both" ? "grid grid-cols-2 gap-2.5" : "grid grid-cols-1 gap-2.5"}>
-            {[{ e: "우안 OD", v: pending.od, t: targetOD }, { e: "좌안 OS", v: pending.os, t: targetOS }].filter((p) => p.v != null).map((p) => {
-              const st = p.v <= p.t ? C.low : p.v <= p.t + 3 ? C.mid : C.high;
-              return (
-                <div key={p.e} style={{ border: `1px solid ${C.line}`, borderRadius: 13, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 700 }}>{p.e}</div>
-                  <div className="flex items-baseline gap-1"><span style={{ fontSize: 28, fontWeight: 800, color: st }}>{p.v.toFixed(1)}</span><span style={{ fontSize: 11, color: C.sub }}>mmHg</span></div>
-                  <div style={{ fontSize: 10.5, color: st, fontWeight: 600 }}>목표 {p.t} · {p.v > p.t ? `+${(p.v - p.t).toFixed(1)} 초과` : "이내"}</div>
+        </div>
+
+        {/* 기기 수신 이력 */}
+        {auto && log.length > 0 && (
+          <div style={{ marginTop: 12, paddingTop: 11, borderTop: `1px solid ${C.line}` }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: C.sub, marginBottom: 6 }}>기기 수신 이력</div>
+            <div className="flex flex-col gap-1">
+              {log.slice(0, 4).map((r, i) => (
+                <div key={i} className="flex items-center gap-2" style={{ fontSize: 11 }}>
+                  <span style={{ fontWeight: 800, color: "#fff", background: r.eye === "od" ? C.od : C.os, padding: "1px 7px", borderRadius: 99, fontSize: 9.5 }}>{r.eye === "od" ? "우안" : "좌안"}</span>
+                  <span style={{ fontWeight: 800, color: C.ink, fontVariantNumeric: "tabular-nums" }}>{r.v.toFixed(1)}</span>
+                  <span style={{ color: C.sub }}>mmHg</span>
+                  {r.re && <span style={{ fontSize: 9.5, fontWeight: 700, color: C.mid, background: C.midSoft, padding: "1px 6px", borderRadius: 99 }}>재측정 갱신</span>}
+                  <span style={{ color: C.grey, marginLeft: "auto" }}>{r.at}</span>
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
-          <div>
+        )}
+
+        {/* 측정 상황 */}
+        {hasAny && (
+          <div style={{ marginTop: 12 }}>
             <div style={{ fontSize: 11.5, fontWeight: 700, color: C.sub, marginBottom: 6 }}>측정 상황 (선택)</div>
             <div className="flex flex-wrap" style={{ gap: 5 }}>
               {CTX_OPTS.map((o) => (
@@ -1719,13 +2113,21 @@ function MeasurePanel({ onClose, onSave, targetOD, targetOS, baseOD }) {
               ))}
             </div>
           </div>
-          <div style={{ fontSize: 11.5, color: C.sub }}>측정 시각 · {pending.date} {pending.time}</div>
-          <div className="flex gap-2.5">
-            <button onClick={() => setPending(null)} className="cursor-pointer flex items-center justify-center gap-1.5" style={{ width: 120, border: `1.5px solid ${C.line}`, background: "#fff", color: C.high, borderRadius: 13, padding: "13px 0", fontSize: 14, fontWeight: 700, fontFamily: FONT }}><Trash2 size={15} /> 다시 측정</button>
-            <button onClick={() => onSave({ ...pending, ctx })} className="cursor-pointer" style={{ flex: 1, border: "none", background: C.primary, color: "#fff", borderRadius: 13, padding: "13px 0", fontSize: 15, fontWeight: 800, fontFamily: FONT }}>저장</button>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* 취소 · 저장 */}
+      <div className="flex gap-2.5" style={{ padding: "0 16px 16px" }}>
+        <button onClick={onClose} className="cursor-pointer flex items-center justify-center gap-1.5"
+          style={{ flex: 1, border: `1.5px solid ${C.high}45`, background: "#fff", color: C.high, borderRadius: 13, padding: "13px 0", fontSize: 14.5, fontWeight: 800, fontFamily: FONT }}>
+          <X size={16} /> 취소
+        </button>
+        <button onClick={save} disabled={!hasAny} className="cursor-pointer flex items-center justify-center gap-1.5"
+          style={{ flex: 1.4, border: "none", background: hasAny ? C.low : C.mintDeep, color: "#fff", borderRadius: 13, padding: "13px 0", fontSize: 15, fontWeight: 800, fontFamily: FONT }}>
+          <Check size={17} strokeWidth={3} /> 저장
+        </button>
+      </div>
+      {!hasAny && <div style={{ fontSize: 10.5, color: C.sub, textAlign: "center", padding: "0 16px 14px", marginTop: -8 }}>측정값이 하나 이상 있어야 저장할 수 있습니다.</div>}
     </Card>
   );
 }
@@ -1945,7 +2347,7 @@ function IOPScreen({ sessions, setSessions, targetOD, targetOS, setTargetOD, set
           <div className="flex items-center gap-3">
             <div className="flex-1">
               <div style={{ fontSize: 13.5, fontWeight: 800, color: C.ink }}>지금 측정하기</div>
-              <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2, lineHeight: 1.5 }}>우안·좌안·양안 중 선택해 측정합니다. 한쪽만 측정해도 기록됩니다.</div>
+              <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2, lineHeight: 1.5 }}>CVT200이 좌·우를 자동으로 구분해 전송합니다. 한쪽만 측정해도 기록됩니다.</div>
             </div>
             <button onClick={() => setOpen(true)} className="flex items-center gap-2 cursor-pointer"
               style={{ border: "none", borderRadius: 14, padding: "12px 18px", background: C.primary, color: "#fff", fontWeight: 800, fontSize: 14, fontFamily: FONT }}><Gauge size={17} /> 측정</button>
@@ -2051,7 +2453,10 @@ function IOPScreen({ sessions, setSessions, targetOD, targetOS, setTargetOD, set
             <SectionTitle icon={TrendingUp}>일중 변동폭</SectionTitle>
             <FlucChart data={pts} height={140} />
             <div className="flex items-center gap-4 flex-wrap" style={{ marginTop: 6 }}>
-              <Legend c={C.primary} t="3.5 미만" /><Legend c={C.mid} t="3.5–5" /><Legend c={C.high} t="5 이상" />
+              <Legend c={C.primary} t="2 미만" /><Legend c={C.mid} t="2–5" /><Legend c={C.high} t="5 이상" />
+            </div>
+            <div style={{ fontSize: 10.5, color: C.sub, marginTop: 9, lineHeight: 1.5, background: C.bg, borderRadius: 10, padding: "9px 11px" }}>
+              하루 중 최고와 최저 안압의 차이입니다. <b style={{ color: C.primary }}>2 mmHg 미만</b>이면 안정적이고, <b style={{ color: C.mid }}>2–5</b>는 관찰이 필요하며, <b style={{ color: C.high }}>5 이상</b>이 반복되면 평균 안압이 정상이어도 시신경에 부담이 될 수 있습니다.
             </div>
           </Card>
         </>
@@ -2107,7 +2512,8 @@ function EyeCheck({ m, onDrop }) {
     </div>
   );
 }
-function MedCard({ m, nowMin, onDrop, onOpen, boosted, level }) {
+function MedCard({ m, nowMin, onDrop, onOpen, boosted, level, dev, waiting }) {
+  const auto = m.dropMode === "auto" && !!dev;
   const st = medStatus(m, nowMin);
   const g = drugClass(m.ingr);
   const b = bottleState(m);
@@ -2127,10 +2533,14 @@ function MedCard({ m, nowMin, onDrop, onOpen, boosted, level }) {
             <DoseBadge dose={m.dose} small />
           </div>
           <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{m.ingr} · {m.maker}</div>
-          <div className="flex items-center gap-1.5" style={{ marginTop: 4 }}>
+          <div className="flex items-center gap-1.5" style={{ marginTop: 4, flexWrap: "wrap" }}>
             <EyeBadge eye={m.eye} small />
             <span style={{ fontSize: 11.5, fontWeight: 700, color: C.ink }}>{m.time === "필요 시" ? "필요 시" : m.time}</span>
             <span style={{ fontSize: 10.5, color: C.sub }}>{m.freq}</span>
+          </div>
+          <div className="flex items-center gap-1.5" style={{ marginTop: 4 }}>
+            <span style={{ fontSize: 9.5, fontWeight: 800, color: auto ? C.primary : C.gold, background: auto ? C.mint : C.goldSoft, padding: "1px 7px", borderRadius: 99 }}>{auto ? "자동 점안" : "수동 기록"}</span>
+            <MonitorBadge dev={dev} small />
           </div>
           {st && st.kind !== "done" && <div style={{ fontSize: 11, fontWeight: 700, color: st.c, marginTop: 3 }}>{st.kind === "soon" ? "⏰ " : st.kind === "late" ? "🔔 " : ""}{st.label}</div>}
           {boosted && !allDone && (
@@ -2142,7 +2552,24 @@ function MedCard({ m, nowMin, onDrop, onOpen, boosted, level }) {
         <ChevronRight size={16} color={C.grey} className="flex-shrink-0" />
       </div>
 
-      <div style={{ marginTop: 11 }}><EyeCheck m={m} onDrop={onDrop} /></div>
+      {auto && waiting && !allDone && (
+        <div className="flex items-center gap-2" style={{ marginTop: 10, padding: "9px 11px", borderRadius: 11, background: C.mint }}>
+          <RefreshCw size={13} color={C.primary} className="animate-spin flex-shrink-0" />
+          <span style={{ fontSize: 11, color: C.ink, lineHeight: 1.4, flex: 1 }}>
+            <b style={{ color: C.primary }}>{dev.label}</b> 신호 대기 중 · 점안하면 좌·우가 자동 기록됩니다.
+          </span>
+        </div>
+      )}
+      {m.dropMode === "auto" && !dev && (
+        <div className="flex items-center gap-2" style={{ marginTop: 10, padding: "9px 11px", borderRadius: 11, background: C.goldSoft }}>
+          <AlertCircle size={13} color={C.gold} className="flex-shrink-0" />
+          <span style={{ fontSize: 11, color: C.ink, lineHeight: 1.4, flex: 1 }}>모니터링 기기가 연결되지 않아 자동 기록이 되지 않습니다. 약을 눌러 기기를 연결하세요.</span>
+        </div>
+      )}
+      <div style={{ marginTop: 11 }}>
+        <EyeCheck m={m} onDrop={onDrop} />
+        {auto && <div style={{ fontSize: 10, color: C.sub, textAlign: "center", marginTop: 5 }}>기기 오류 시 위 버튼으로 직접 기록할 수 있습니다.</div>}
+      </div>
       {["expired", "soon", "low", "out"].includes(b.k) && (
         <div className="flex items-center gap-2" style={{ marginTop: 9, padding: "8px 10px", borderRadius: 10, background: b.bg }}>
           <Package size={13} color={b.c} className="flex-shrink-0" />
@@ -2157,7 +2584,7 @@ function MedCard({ m, nowMin, onDrop, onOpen, boosted, level }) {
     </Card>
   );
 }
-function MedDetail({ m, onBack, onOpenBottle, onLogSE, seLog }) {
+function MedDetail({ m, onBack, onOpenBottle, onLogSE, seLog, dev, onOpenPair, onSetMode }) {
   const g = drugClass(m.ingr);
   const b = bottleState(m);
   const mine = seLog.filter((e) => e.med === m.name);
@@ -2181,7 +2608,62 @@ function MedDetail({ m, onBack, onOpenBottle, onLogSE, seLog }) {
             </div>
           ))}
         </div>
-        <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.6, marginTop: 12, background: C.bg, borderRadius: 11, padding: "10px 12px" }}>{drugDesc(m.ingr)}</div>
+        {m.info ? (
+          <div style={{ marginTop: 12 }}><EyakInfo d={m.info} compact /></div>
+        ) : (
+          <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.6, marginTop: 12, background: C.bg, borderRadius: 11, padding: "10px 12px" }}>{drugDesc(m.ingr)}</div>
+        )}
+        {m.itemSeq && <div style={{ fontSize: 10, color: C.grey, marginTop: 7, fontFamily: "monospace" }}>품목기준코드 {m.itemSeq} · 식약처 e약은요</div>}
+      </Card>
+
+      {/* 점안 모니터링 기기 · 기록 방식 */}
+      <Card style={{ padding: 16 }}>
+        <SectionTitle icon={Bluetooth} right={<MonitorBadge dev={dev} />}>점안 모니터링 기기</SectionTitle>
+        {dev ? (
+          <>
+            <div className="grid grid-cols-4" style={{ gap: 10 }}>
+              {[{ l: "기기", v: dev.label }, { l: "시리얼", v: dev.serial, mono: true }, { l: "배터리", v: `${dev.battery}%`, c: dev.battery <= 20 ? C.high : C.ink }, { l: "펌웨어", v: dev.fw }].map((r) => (
+                <div key={r.l}>
+                  <div style={{ fontSize: 10.5, color: C.sub, fontWeight: 700 }}>{r.l}</div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: r.c || C.ink, marginTop: 2, fontFamily: r.mono ? "monospace" : FONT }}>{r.v}</div>
+                </div>
+              ))}
+            </div>
+            <button onClick={onOpenPair} className="cursor-pointer flex items-center justify-center gap-1.5"
+              style={{ width: "100%", border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 11, padding: "9px 0", fontSize: 12.5, fontWeight: 800, fontFamily: FONT, marginTop: 12 }}>
+              <RefreshCw size={13} /> 기기 변경 · 연결 해제
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.55, marginBottom: 11 }}>
+              이 약에 연결된 모니터링 기기가 없습니다. 기기를 연결하면 점안할 때마다 좌·우와 시각이 자동으로 기록됩니다.
+            </div>
+            <button onClick={onOpenPair} className="cursor-pointer flex items-center justify-center gap-1.5"
+              style={{ width: "100%", border: "none", background: C.primary, color: "#fff", borderRadius: 11, padding: "11px 0", fontSize: 13, fontWeight: 800, fontFamily: FONT }}>
+              <Bluetooth size={14} /> 블루투스 기기 연결
+            </button>
+          </>
+        )}
+
+        <div style={{ marginTop: 14, paddingTop: 13, borderTop: `1px solid ${C.line}` }}>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, marginBottom: 8 }}>점안 기록 방식</div>
+          <div className="flex" style={{ gap: 7 }}>
+            {[{ id: "auto", t: "자동", d: "기기 신호로 기록", icon: Bluetooth, c: C.primary },
+              { id: "manual", t: "수동", d: "직접 체크", icon: Check, c: C.gold }].map((o) => {
+              const on = m.dropMode === o.id;
+              const blocked = o.id === "auto" && !dev;
+              return (
+                <div key={o.id} onClick={() => !blocked && onSetMode(o.id)} className={blocked ? "flex flex-col items-center" : "cursor-pointer flex flex-col items-center"}
+                  style={{ flex: 1, border: `1.5px solid ${on ? o.c : C.line}`, background: on ? o.c + "12" : "#fff", borderRadius: 12, padding: "11px 6px", opacity: blocked ? 0.5 : 1 }}>
+                  <o.icon size={16} color={on ? o.c : C.sub} />
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: on ? o.c : C.ink, marginTop: 4 }}>{o.t}</div>
+                  <div style={{ fontSize: 9.5, color: C.sub, marginTop: 1 }}>{blocked ? "기기 연결 필요" : o.d}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </Card>
 
       <Card style={{ padding: 16 }}>
@@ -2279,27 +2761,87 @@ function SEForm({ med, onCancel, onSubmit }) {
     </Card>
   );
 }
-function AddMed({ onDone }) {
+
+/* ---------- e약은요 의약품 기본정보 ---------- */
+function EyakInfo({ d, compact }) {
+  const [open, setOpen] = useState(compact ? [] : ["efcyQesitm", "useMethodQesitm"]);
+  const toggle = (k) => setOpen((o) => (o.includes(k) ? o.filter((x) => x !== k) : [...o, k]));
+  const rows = EYAK_FIELDS.filter((f) => d[f.k]);
+  if (!rows.length) return null;
+  return (
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, overflow: "hidden" }}>
+      <div className="flex items-center gap-1.5" style={{ padding: "9px 12px", background: C.mint }}>
+        <FileText size={12} color={C.primary} />
+        <span style={{ fontSize: 11.5, fontWeight: 800, color: C.primary }}>의약품 기본정보</span>
+        <span style={{ fontSize: 9.5, color: C.sub, marginLeft: "auto" }}>식약처 e약은요</span>
+      </div>
+      {rows.map((f, i) => {
+        const on = open.includes(f.k);
+        return (
+          <div key={f.k} style={{ borderTop: i > 0 ? `1px solid ${C.line}` : "none" }}>
+            <div onClick={() => toggle(f.k)} className="cursor-pointer flex items-center gap-2" style={{ padding: "9px 12px", background: "#fff" }}>
+              <f.icon size={12} color={C.sub} className="flex-shrink-0" />
+              <span style={{ fontSize: 12, fontWeight: 700, color: C.ink, flex: 1 }}>{f.t}</span>
+              {on ? <ChevronUp size={13} color={C.grey} /> : <ChevronDown size={13} color={C.grey} />}
+            </div>
+            {on && <div style={{ fontSize: 11.5, color: C.sub, lineHeight: 1.6, padding: "0 12px 11px 30px" }}>{d[f.k]}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AddMed({ onDone, devices, onPairDraft }) {
   const [tab, setTab] = useState("qr");
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(null);
   const [scan, setScan] = useState(false);
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [srcTag, setSrcTag] = useState(null);
+  const [touched, setTouched] = useState(false);
   const [eye, setEye] = useState("both");
   const [prn, setPrn] = useState(false);
   const [times, setTimes] = useState(["21:00"]);
   const [cName, setCName] = useState(""); const [cIngr, setCIngr] = useState(""); const [cMaker, setCMaker] = useState(""); const [cDose, setCDose] = useState("다회용");
   const [opened, setOpened] = useState(isoDate(new Date()));
   const [units, setUnits] = useState("30");
-  const chosen = tab === "qr" ? sel : (cName ? { name: cName, ingr: cIngr, maker: cMaker, dose: cDose } : null);
-  const filtered = ALL_DRUGS.filter((d) => !q || (d.name + d.ingr + d.maker).toLowerCase().includes(q.toLowerCase()));
+  const [monitorId, setMonitorId] = useState(null);
+  const [mode, setMode] = useState("auto");
+  const [pairOpen, setPairOpen] = useState(false);
+  const picked = devices.find((d) => d.id === monitorId) || null;
+  const chosen = tab === "qr"
+    ? (sel ? { name: sel.itemName, ingr: sel.ingr, maker: sel.entpName, dose: sel.dose, itemSeq: sel.itemSeq, info: sel } : null)
+    : (cName ? { name: cName, ingr: cIngr, maker: cMaker, dose: cDose } : null);
 
-  const doScan = () => { setScan(true); setTimeout(() => { setScan(false); setSel(ALL_DRUGS[0]); setTimes([ALL_DRUGS[0].def && ALL_DRUGS[0].def.includes("취침") ? "22:00" : "08:00"]); }, 1200); };
+  /* 검색어 입력 → e약은요 조회 (디바운스 400ms) */
+  useEffect(() => {
+    if (tab !== "qr") return;
+    const k = q.trim();
+    if (!k) { setResults([]); setSrcTag(null); setSearching(false); return; }
+    setSearching(true); setTouched(true);
+    const t = setTimeout(async () => {
+      const r = await searchEyak(k);
+      setResults(r.items); setSrcTag(r.source); setSearching(false);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [q, tab]);
+
+  const pickDrug = (d) => {
+    setSel(d);
+    const night = (d.useMethodQesitm || "").includes("저녁") || (d.useMethodQesitm || "").includes("취침");
+    const twice = (d.useMethodQesitm || "").includes("1일 2회");
+    const thrice = (d.useMethodQesitm || "").includes("1일 3회");
+    setTimes(night ? ["22:00"] : thrice ? ["08:00", "14:00", "20:00"] : twice ? ["08:00", "20:00"] : ["08:00"]);
+  };
+  const doScan = () => { setScan(true); setTimeout(() => { setScan(false); pickDrug(EYAK_DB[0]); }, 1200); };
   const add = () => {
     if (!chosen) return;
-    const base = { name: chosen.name, ingr: chosen.ingr || "", maker: chosen.maker || "", dose: chosen.dose || "다회용", eye, freq: prn ? "필요 시" : `1일 ${times.length}회 · ${times.join("·")}`, src: chosen.dose === "일회용" ? "manual" : "device", takenEye: {}, taken: false, at: null, rxFrom: isoDate(new Date()), rxBy: "직접 등록", times: prn ? [] : times, openedAt: chosen.dose === "다회용" ? opened : null, dropsTotal: chosen.dose === "다회용" ? 100 : null, dropsUsed: 0, unitsLeft: chosen.dose === "일회용" ? Number(units) || 0 : null };
+    const base = { name: chosen.name, ingr: chosen.ingr || "", maker: chosen.maker || "", itemSeq: chosen.itemSeq || null, info: chosen.info || null, dose: chosen.dose || "다회용", eye, freq: prn ? "필요 시" : `1일 ${times.length}회 · ${times.join("·")}`, src: monitorId ? "device" : "manual", dropMode: monitorId ? mode : "manual", takenEye: {}, taken: false, at: null, rxFrom: isoDate(new Date()), rxBy: "직접 등록", times: prn ? [] : times, openedAt: chosen.dose === "다회용" ? opened : null, dropsTotal: chosen.dose === "다회용" ? 100 : null, dropsUsed: 0, unitsLeft: chosen.dose === "일회용" ? Number(units) || 0 : null };
     const list = prn ? [{ ...base, id: "n" + Date.now(), time: "필요 시" }]
       : times.map((t, i) => ({ ...base, id: "n" + Date.now() + i, time: t, linkOf: i > 0 ? "n" + Date.now() : undefined }));
-    onDone(list);
+    onDone(list, monitorId);
   };
 
   return (
@@ -2318,26 +2860,115 @@ function AddMed({ onDone }) {
           <Card style={{ padding: 15 }}>
             <div className="flex items-center gap-3">
               <div className="flex items-center justify-center flex-shrink-0" style={{ width: 44, height: 44, borderRadius: 13, background: C.mint, color: C.primary }}>{scan ? <ScanLine size={22} className="animate-spin" /> : <QrCode size={22} />}</div>
-              <div className="flex-1"><div style={{ fontSize: 13.5, fontWeight: 800, color: C.ink }}>{scan ? "스캔 중…" : "약 상자 QR 스캔"}</div><div style={{ fontSize: 11, color: C.sub, marginTop: 1 }}>제품명·성분·제형이 자동 입력됩니다.</div></div>
+              <div className="flex-1"><div style={{ fontSize: 13.5, fontWeight: 800, color: C.ink }}>{scan ? "스캔 중…" : "약 상자 QR 스캔"}</div><div style={{ fontSize: 11, color: C.sub, marginTop: 1 }}>표준코드를 읽어 e약은요 정보를 자동으로 불러옵니다.</div></div>
               <button onClick={doScan} className="cursor-pointer" style={{ border: "none", background: C.primary, color: "#fff", borderRadius: 11, padding: "9px 15px", fontSize: 12.5, fontWeight: 800, fontFamily: FONT }}>스캔</button>
             </div>
           </Card>
-          <div className="flex items-center gap-2" style={{ border: `1px solid ${C.line}`, borderRadius: 12, padding: "9px 12px", background: "#fff" }}>
-            <Search size={15} color={C.sub} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="제품명 · 성분 · 제약사 검색" style={{ flex: 1, border: "none", outline: "none", fontSize: 13, fontFamily: FONT, color: C.ink }} />
+          <div className="flex items-center gap-2" style={{ border: `1px solid ${q ? C.primary : C.line}`, borderRadius: 12, padding: "9px 12px", background: "#fff" }}>
+            {searching ? <RefreshCw size={15} color={C.primary} className="animate-spin" /> : <Search size={15} color={C.sub} />}
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="제품명 · 성분 · 제약사 검색 (예: 라타노프로스트)"
+              style={{ flex: 1, border: "none", outline: "none", fontSize: 13, fontFamily: FONT, color: C.ink }} />
+            {q && <X size={15} color={C.grey} className="cursor-pointer" onClick={() => { setQ(""); setSel(null); }} />}
           </div>
+
+          {/* 연동 출처 안내 */}
+          <div className="flex items-center gap-1.5" style={{ fontSize: 10.5, color: C.sub, marginTop: -4 }}>
+            <FileText size={11} color={C.primary} />
+            <span>식품의약품안전처 <b style={{ color: C.primary }}>의약품개요정보(e약은요)</b> 연동
+              {srcTag === "local" && <span style={{ color: C.gold }}> · 오프라인 데이터</span>}
+              {srcTag === "api" && <span style={{ color: C.low }}> · 실시간 조회</span>}
+            </span>
+          </div>
+
           <div className="flex flex-col gap-2">
-            {filtered.slice(0, 8).map((d) => (
-              <Card key={d.name} onClick={() => { setSel(d); setTimes([d.def && d.def.includes("취침") ? "22:00" : "08:00"]); }} className="cursor-pointer"
-                style={{ padding: 12, borderColor: sel && sel.name === d.name ? C.primary : C.line, background: sel && sel.name === d.name ? C.mint : "#fff" }}>
-                <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 800, color: C.ink }}>{d.name}</span>
-                  <ClassBadge ingr={d.ingr} small /><DoseBadge dose={d.dose} small />
-                  {d.own && <span style={{ fontSize: 9.5, fontWeight: 800, color: C.gold, background: C.goldSoft, padding: "1px 7px", borderRadius: 99 }}>대우제약</span>}
+            {searching && (
+              <div className="flex items-center justify-center gap-2" style={{ padding: "22px 0", color: C.sub, fontSize: 12.5 }}>
+                <RefreshCw size={14} className="animate-spin" /> 의약품 정보를 조회하고 있습니다…
+              </div>
+            )}
+            {!searching && touched && q.trim() && results.length === 0 && (
+              <div className="flex flex-col items-center" style={{ padding: "24px 0", color: C.sub }}>
+                <Search size={20} color={C.mintDeep} />
+                <div style={{ fontSize: 12.5, marginTop: 8 }}>검색 결과가 없습니다.</div>
+                <div style={{ fontSize: 11, marginTop: 3, textAlign: "center", lineHeight: 1.5 }}>성분명으로 다시 찾아보거나<br /><b style={{ color: C.primary }}>직접 입력</b> 탭을 이용하세요.</div>
+              </div>
+            )}
+            {!searching && !q.trim() && (
+              <>
+                <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.6, background: C.bg, borderRadius: 11, padding: "11px 12px" }}>
+                  제품명이나 성분명을 입력하면 식약처 의약품개요정보에서 약을 찾아 <b style={{ color: C.primary }}>효능·사용법·주의사항·이상반응·보관법</b>을 함께 보여 드립니다.
                 </div>
-                <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{d.ingr} · {d.maker} · {d.def}</div>
-              </Card>
-            ))}
+
+                {/* 검색 없이 바로 고르는 대표 안압약 */}
+                <div className="flex items-center gap-1.5" style={{ marginTop: 4 }}>
+                  <ListChecks size={13} color={C.primary} />
+                  <span style={{ fontSize: 12.5, fontWeight: 800, color: C.ink }}>자주 쓰는 녹내장 안압약</span>
+                  <span style={{ fontSize: 10.5, color: C.sub }}>바로 선택</span>
+                </div>
+
+                {QUICK_GROUPS.map((g) => (
+                  <div key={g.label}>
+                    <div className="flex items-center gap-1.5" style={{ margin: "6px 0 6px" }}>
+                      {g.accent && <span style={{ width: 3, height: 12, borderRadius: 2, background: C.gold }} />}
+                      <span style={{ fontSize: 11, fontWeight: 800, color: g.accent ? C.gold : C.sub }}>{g.label}</span>
+                      {g.accent && <span style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: C.gold, padding: "1px 7px", borderRadius: 99 }}>자사</span>}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {g.seqs.map(eyakBySeq).filter(Boolean).map((d) => {
+                        const on = sel && sel.itemSeq === d.itemSeq;
+                        return (
+                          <Card key={d.itemSeq} style={{ padding: 11, borderColor: on ? C.primary : g.accent ? C.gold + "50" : C.line, background: on ? C.mint : g.accent ? C.goldSoft + "50" : "#fff" }}>
+                            <div onClick={() => pickDrug(d)} className="cursor-pointer flex items-center gap-2">
+                              <div className="flex items-center justify-center flex-shrink-0" style={{ width: 30, height: 30, borderRadius: 9, background: on ? "#fff" : g.accent ? "#fff" : C.bg, color: drugClass(d.ingr).c }}>
+                                <Droplets size={15} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5" style={{ flexWrap: "wrap" }}>
+                                  <span style={{ fontSize: 13, fontWeight: 800, color: C.ink }}>{d.itemName}</span>
+                                  {d.own && <span style={{ fontSize: 9, fontWeight: 800, color: C.gold, background: "#fff", padding: "1px 6px", borderRadius: 99, border: `1px solid ${C.gold}45` }}>대우제약</span>}
+                                  <DoseBadge dose={d.dose} small />
+                                </div>
+                                <div style={{ fontSize: 10.5, color: C.sub, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {d.ingr}{d.own ? "" : ` · ${d.entpName}`}
+                                </div>
+                              </div>
+                              {on ? <Check size={15} color={C.primary} strokeWidth={3} className="flex-shrink-0" /> : <ChevronRight size={14} color={C.grey} className="flex-shrink-0" />}
+                            </div>
+                            {on && (
+                              <>
+                                <div style={{ fontSize: 11, color: C.ink, marginTop: 8, lineHeight: 1.5 }}>{d.efcyQesitm}</div>
+                                <div style={{ marginTop: 9 }}><EyakInfo d={d} compact /></div>
+                                <div style={{ fontSize: 9.5, color: C.grey, marginTop: 6, fontFamily: "monospace" }}>품목기준코드 {d.itemSeq}</div>
+                              </>
+                            )}
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {!searching && results.map((d) => {
+              const on = sel && sel.itemSeq === d.itemSeq;
+              return (
+                <Card key={d.itemSeq} style={{ padding: 12, borderColor: on ? C.primary : C.line, background: on ? C.mint : "#fff" }}>
+                  <div onClick={() => pickDrug(d)} className="cursor-pointer">
+                    <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 800, color: C.ink }}>{d.itemName}</span>
+                      <ClassBadge ingr={d.ingr} small />
+                      <DoseBadge dose={d.dose} small />
+                      {on && <Check size={14} color={C.primary} strokeWidth={3} style={{ marginLeft: "auto" }} />}
+                    </div>
+                    <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{d.ingr} · {d.entpName}</div>
+                    <div style={{ fontSize: 11, color: C.ink, marginTop: 5, lineHeight: 1.5 }}>{d.efcyQesitm}</div>
+                    <div style={{ fontSize: 10, color: C.grey, marginTop: 4, fontFamily: "monospace" }}>품목기준코드 {d.itemSeq}</div>
+                  </div>
+                  {on && <div style={{ marginTop: 10 }}><EyakInfo d={d} /></div>}
+                </Card>
+              );
+            })}
           </div>
         </>
       ) : (
@@ -2355,7 +2986,11 @@ function AddMed({ onDone }) {
 
       {chosen && (
         <Card style={{ padding: 15 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 800, color: C.ink, marginBottom: 11 }}>용법 설정</div>
+          <div className="flex items-center gap-2" style={{ marginBottom: 11, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13.5, fontWeight: 800, color: C.ink }}>용법 설정</span>
+            <span style={{ fontSize: 11, color: C.sub }}>{chosen.name}</span>
+            {chosen.itemSeq && <span style={{ fontSize: 9.5, fontWeight: 700, color: C.primary, background: C.mint, padding: "1px 7px", borderRadius: 99 }}>e약은요 연동</span>}
+          </div>
           <div className="flex flex-col gap-3">
             <Field label="점안 부위">
               <div className="flex" style={{ gap: 5 }}>
@@ -2384,10 +3019,58 @@ function AddMed({ onDone }) {
             {chosen.dose === "다회용"
               ? <Field label="개봉일 (개봉 후 28일 폐기 알림)"><input type="date" value={opened} max={isoDate(new Date())} onChange={(e) => setOpened(e.target.value)} style={inp} /></Field>
               : <Field label="남은 개수 (일회용 앰플)"><input type="number" min="0" value={units} onChange={(e) => setUnits(e.target.value)} style={inp} /></Field>}
+            {/* 점안 모니터링 기기 매칭 */}
+            <div style={{ border: `1px solid ${picked ? C.primary : C.line}`, borderRadius: 12, padding: "12px 13px", background: picked ? C.mint : C.bg }}>
+              <div className="flex items-center gap-1.5" style={{ marginBottom: 8 }}>
+                <Bluetooth size={13} color={C.primary} />
+                <span style={{ fontSize: 12, fontWeight: 800, color: C.ink }}>점안 모니터링 기기</span>
+                <span style={{ fontSize: 10, color: C.sub }}>약 1개당 1대</span>
+              </div>
+              {picked ? (
+                <div className="flex items-center gap-2.5">
+                  <div className="flex items-center justify-center flex-shrink-0" style={{ width: 32, height: 32, borderRadius: 10, background: "#fff", color: C.primary }}><Bluetooth size={16} /></div>
+                  <div className="flex-1">
+                    <div style={{ fontSize: 13, fontWeight: 800, color: C.ink }}>{picked.label}</div>
+                    <div style={{ fontSize: 10, color: C.sub, fontFamily: "monospace" }}>{picked.serial} · 배터리 {picked.battery}%</div>
+                  </div>
+                  <button onClick={() => setPairOpen(true)} className="cursor-pointer" style={{ border: `1px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 8, padding: "6px 11px", fontSize: 11, fontWeight: 700, fontFamily: FONT }}>변경</button>
+                </div>
+              ) : (
+                <button onClick={() => setPairOpen(true)} className="cursor-pointer flex items-center justify-center gap-1.5"
+                  style={{ width: "100%", border: `1.5px dashed ${C.primary}`, background: "#fff", color: C.primary, borderRadius: 11, padding: "10px 0", fontSize: 12.5, fontWeight: 800, fontFamily: FONT }}>
+                  <Bluetooth size={14} /> 블루투스 기기 연결하기
+                </button>
+              )}
+            </div>
+
+            <Field label="점안 기록 방식">
+              <div className="flex" style={{ gap: 7 }}>
+                {[{ id: "auto", t: "자동", d: "기기 신호로 기록", icon: Bluetooth, c: C.primary },
+                  { id: "manual", t: "수동", d: "직접 체크", icon: Check, c: C.gold }].map((o) => {
+                  const on = mode === o.id;
+                  const blocked = o.id === "auto" && !picked;
+                  return (
+                    <div key={o.id} onClick={() => !blocked && setMode(o.id)} className={blocked ? "flex flex-col items-center" : "cursor-pointer flex flex-col items-center"}
+                      style={{ flex: 1, border: `1.5px solid ${on ? o.c : C.line}`, background: on ? o.c + "12" : "#fff", borderRadius: 12, padding: "11px 6px", opacity: blocked ? 0.5 : 1 }}>
+                      <o.icon size={16} color={on ? o.c : C.sub} />
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: on ? o.c : C.ink, marginTop: 4 }}>{o.t}</div>
+                      <div style={{ fontSize: 9.5, color: C.sub, marginTop: 1 }}>{blocked ? "기기 연결 필요" : o.d}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Field>
+
             <button onClick={add} className="cursor-pointer" style={{ border: "none", borderRadius: 13, padding: "13px 0", background: C.primary, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: FONT }}>등록하기</button>
-            {chosen.dose === "일회용" && <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.5 }}>일회용(BFS)은 디바이스 자동 감지가 어려워 <b>수기 입력</b>으로 기록됩니다.</div>}
           </div>
         </Card>
+      )}
+
+      {pairOpen && (
+        <BtPairModal med={{ id: "draft", name: chosen ? chosen.name : "새 점안제" }} devices={devices}
+          onClose={() => setPairOpen(false)}
+          onPair={(id) => { setMonitorId(id); setMode("auto"); }}
+          onUnpair={() => { setMonitorId(null); setMode("manual"); }} />
       )}
     </div>
   );
@@ -2397,6 +3080,9 @@ function DropsScreen({ meds, setMeds, seLog, setSeLog, nowMin, medUp, medOver, p
   const [detailId, setDetailId] = useState(null);
   const [adding, setAdding] = useState(false);
   const [seFor, setSeFor] = useState(null);
+  const [dropDevs, setDropDevs] = useState(DROP_DEVICES_INIT);
+  const [pairFor, setPairFor] = useState(null);
+  const autoFired = useRef(new Set());
   const [period, setPeriod] = useState("1개월");
   const [from, setFrom] = useState(RANGE_FROM_DEFAULT);
   const [to, setTo] = useState(RANGE_TO_DEFAULT);
@@ -2431,10 +3117,57 @@ function DropsScreen({ meds, setMeds, seLog, setSeLog, nowMin, medUp, medOver, p
     setSeFor(null);
   };
 
+  /* 기기 매칭 (약 1개 ↔ 기기 1대) */
+  const pairDev = (m, devId) => setDropDevs((ds) => ds.map((d) =>
+    d.id === devId ? { ...d, pairedTo: medKey(m), connected: true }
+      : d.pairedTo === medKey(m) ? { ...d, pairedTo: null, connected: false } : d));
+  const unpairDev = (m) => setDropDevs((ds) => ds.map((d) => (d.pairedTo === medKey(m) ? { ...d, pairedTo: null, connected: false } : d)));
+  const setMode = (m, mode) => setMeds((ms) => ms.map((x) => (medKey(x) === medKey(m) ? { ...x, dropMode: mode } : x)));
+
+  /* 자동 점안: 연결된 기기에서 점안 신호가 들어오면 좌·우가 자동 기록된다.
+     실제 구현에서는 BLE notify 이벤트로 대체한다. */
+  useEffect(() => {
+    if (view !== "today") return;
+    const timers = [];
+    meds.filter((m) => m.dropMode === "auto" && m.time !== "필요 시" && !m.taken && monitorOf(dropDevs, m)).forEach((m, idx) => {
+      const eyes = m.eye === "both" ? ["od", "os"] : [m.eye];
+      eyes.forEach((e, i) => {
+        const key = `${m.id}-${e}`;
+        if (autoFired.current.has(key) || (m.takenEye && m.takenEye[e])) return;
+        timers.push(setTimeout(() => {
+          autoFired.current.add(key);
+          setMeds((ms) => ms.map((x) => {
+            if (x.id !== m.id) return x;
+            const te = { ...(x.takenEye || {}), [e]: nowHM() };
+            const all = eyes.every((y) => te[y]);
+            return { ...x, takenEye: te, taken: all, at: all ? te[eyes[eyes.length - 1]] : null,
+              dropsUsed: x.dose === "다회용" ? (x.dropsUsed || 0) + 1 : x.dropsUsed,
+              unitsLeft: x.dose === "일회용" && x.unitsLeft != null ? Math.max(0, x.unitsLeft - 1) : x.unitsLeft };
+          }));
+        }, 5200 + idx * 3400 + i * 2200));
+      });
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [view, meds, dropDevs]);
+
   const detail = detailId ? meds.find((m) => m.id === detailId) : null;
-  if (adding) return <AddMed onDone={(list) => { if (list) setMeds((ms) => [...ms, ...list]); setAdding(false); }} />;
+  if (adding) return <AddMed devices={dropDevs} onDone={(list, monitorId) => {
+    if (list) {
+      setMeds((ms) => [...ms, ...list]);
+      if (monitorId) setDropDevs((ds) => ds.map((d) => (d.id === monitorId ? { ...d, pairedTo: list[0].id, connected: true } : d)));
+    }
+    setAdding(false);
+  }} />;
   if (seFor) return <SEForm med={seFor} onCancel={() => setSeFor(null)} onSubmit={(d) => addSE(seFor, d)} />;
-  if (detail) return <MedDetail m={detail} onBack={() => setDetailId(null)} onOpenBottle={openBottle} onLogSE={(m) => setSeFor(m)} seLog={seLog} />;
+  if (detail) return (
+    <>
+      <MedDetail m={detail} onBack={() => setDetailId(null)} onOpenBottle={openBottle} onLogSE={(m) => setSeFor(m)} seLog={seLog}
+        dev={monitorOf(dropDevs, detail)} onOpenPair={() => setPairFor(detail)} onSetMode={(mode) => setMode(detail, mode)} />
+      {pairFor && <BtPairModal med={pairFor} devices={dropDevs} onClose={() => setPairFor(null)}
+        onPair={(id) => { pairDev(pairFor, id); setMode(pairFor, "auto"); }}
+        onUnpair={() => { unpairDev(pairFor); setMode(pairFor, "manual"); }} />}
+    </>
+  );
 
   const sched = [...meds].filter((m) => m.time !== "필요 시").sort((a, b) => a.time.localeCompare(b.time));
   const prn = meds.filter((m) => m.time === "필요 시");
@@ -2442,6 +3175,9 @@ function DropsScreen({ meds, setMeds, seLog, setSeLog, nowMin, medUp, medOver, p
   const eyesDone = sched.reduce((a, m) => a + Object.keys(m.takenEye || {}).length, 0);
   const pct = eyesTotal ? Math.round((eyesDone / eyesTotal) * 100) : 0;
   const bottles = bottleAlerts(meds);
+  const uniqMeds = Array.from(new Map(meds.map((m) => [medKey(m), m])).values());
+  const medCnt = uniqMeds.length;
+  const pairedCnt = uniqMeds.filter((m) => monitorOf(dropDevs, m)).length;
 
   return (
     <div className="flex flex-col gap-3.5">
@@ -2472,6 +3208,39 @@ function DropsScreen({ meds, setMeds, seLog, setSeLog, nowMin, medUp, medOver, p
             </div>
             <div style={{ fontSize: 10.5, color: C.sub, marginTop: 8, lineHeight: 1.5 }}>
               좌·우안을 각각 체크합니다. 한쪽만 점안한 경우도 정확히 기록됩니다.
+            </div>
+          </Card>
+
+          {/* 점안 모니터링 기기 연결 현황 */}
+          <Card style={{ padding: 14 }}>
+            <SectionTitle icon={Bluetooth} right={
+              <span style={{ fontSize: 11, fontWeight: 800, color: pairedCnt === medCnt ? C.low : C.mid }}>{pairedCnt}/{medCnt} 연결</span>
+            }>점안 모니터링 기기</SectionTitle>
+            <div className="flex flex-col gap-2">
+              {Array.from(new Map(sched.concat(prn).map((m) => [medKey(m), m])).values()).map((m) => {
+                const d = monitorOf(dropDevs, m);
+                return (
+                  <div key={medKey(m)} className="flex items-center gap-2.5" style={{ border: `1px solid ${C.line}`, borderRadius: 11, padding: "9px 11px" }}>
+                    <div className="flex items-center justify-center flex-shrink-0" style={{ width: 30, height: 30, borderRadius: 9, background: d ? C.mint : "#F1F4F4", color: d ? C.primary : C.grey }}>
+                      <Bluetooth size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</div>
+                      <div style={{ fontSize: 10, color: C.sub, marginTop: 1 }}>
+                        {d ? `${d.serial} · 배터리 ${d.battery}%` : "연결된 기기 없음"}
+                      </div>
+                    </div>
+                    <MonitorBadge dev={d} small />
+                    <button onClick={() => setPairFor(m)} className="cursor-pointer flex-shrink-0"
+                      style={{ border: `1px solid ${d ? C.line : C.primary}`, background: "#fff", color: d ? C.sub : C.primary, borderRadius: 8, padding: "5px 10px", fontSize: 11, fontWeight: 800, fontFamily: FONT }}>
+                      {d ? "변경" : "연결"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10.5, color: C.sub, marginTop: 9, lineHeight: 1.5 }}>
+              약 1개당 기기 1대를 연결합니다. 연결된 약은 점안 시 좌·우가 자동 기록되고, 미연결 약은 수동으로 체크합니다.
             </div>
           </Card>
 
@@ -2533,14 +3302,15 @@ function DropsScreen({ meds, setMeds, seLog, setSeLog, nowMin, medUp, medOver, p
           )}
 
           <div className="flex flex-col gap-2.5">
-            {sched.map((m) => <MedCard key={m.id} m={m} nowMin={nowMin} onDrop={drop} onOpen={setDetailId} boosted={boostSlots.includes(m.time)} level={level} />)}
+            {sched.map((m) => <MedCard key={m.id} m={m} nowMin={nowMin} onDrop={drop} onOpen={setDetailId}
+              boosted={boostSlots.includes(m.time)} level={level} dev={monitorOf(dropDevs, m)} waiting />)}
           </div>
 
           {prn.length > 0 && (
             <>
               <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginTop: 4 }}>필요 시 점안</div>
               <div className="flex flex-col gap-2.5">
-                {prn.map((m) => <MedCard key={m.id} m={m} nowMin={nowMin} onDrop={drop} onOpen={setDetailId} />)}
+                {prn.map((m) => <MedCard key={m.id} m={m} nowMin={nowMin} onDrop={drop} onOpen={setDetailId} dev={monitorOf(dropDevs, m)} />)}
               </div>
             </>
           )}
@@ -2674,6 +3444,12 @@ function DropsScreen({ meds, setMeds, seLog, setSeLog, nowMin, medUp, medOver, p
             )}
           </Card>
         </>
+      )}
+
+      {pairFor && view === "today" && (
+        <BtPairModal med={pairFor} devices={dropDevs} onClose={() => setPairFor(null)}
+          onPair={(id) => { pairDev(pairFor, id); setMode(pairFor, "auto"); }}
+          onUnpair={() => { unpairDev(pairFor); setMode(pairFor, "manual"); }} />
       )}
 
       {view === "se" && (
@@ -3129,6 +3905,85 @@ const TABS = [
   { id: "survey", label: "문진", icon: ClipboardList },
   { id: "health", label: "건강", icon: Watch },
 ];
+
+/* ---------- 환자 앱 알림 패널 ---------- */
+function buildNotices({ medUp, medOver, bottles, rent, level, adhWin, streak }) {
+  const out = [];
+  (medOver || []).forEach((m) => out.push({
+    id: `late-${m.id}`, icon: Droplets, c: C.high, bg: C.highSoft, tab: "drops",
+    title: "점안 시간이 지났습니다", body: `${m.name} · ${m.time} 예정 (${m.late}분 경과)`,
+    tag: "점안", when: m.time,
+  }));
+  (medUp || []).forEach((m) => out.push({
+    id: `soon-${m.id}`, icon: Bell, c: C.mid, bg: C.midSoft, tab: "drops",
+    title: "곧 점안 시간입니다", body: `${m.name} · ${m.diff}분 후 (${m.time})`,
+    tag: "점안", when: m.time,
+  }));
+  (bottles || []).forEach((x) => out.push({
+    id: `bot-${x.med.id}`, icon: Package, c: x.b.c, bg: x.b.bg, tab: "drops",
+    title: x.b.k === "expired" ? "점안제 폐기가 필요합니다" : x.b.k === "out" ? "점안제가 소진되었습니다" : "점안제 교체가 다가옵니다",
+    body: `${x.med.name} · ${x.b.label}`, tag: "약병",
+  }));
+  if (rent) out.push({
+    id: `rent-${rent.key}`, icon: rent.icon, c: rent.c, bg: rent.bg, tab: "settings",
+    title: rent.title, body: rent.msg, tag: "기기",
+  });
+  if (level && level.key !== "ok") out.push({
+    id: `adh-${level.key}`, icon: level.icon, c: level.c, bg: level.bg, tab: "drops",
+    title: level.title,
+    body: `최근 ${ADH_ESC_CFG_INIT.window}일 순응도 ${adhWin.pct}% · ${adhWin.missed}회 누락${streak > 0 ? ` · 연속 미완료 ${streak}일` : ""}`,
+    tag: "순응도",
+  });
+  return out;
+}
+function NoticePanel({ notices, onClose, onGo }) {
+  return (
+    <div style={{ position: "absolute", inset: 0, zIndex: 45 }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(10,42,49,.35)" }} />
+      <div style={{ position: "absolute", top: 74, left: 14, right: 14, maxHeight: 560, overflowY: "auto",
+                    background: "#fff", borderRadius: 18, border: `1px solid ${C.line}`, boxShadow: "0 22px 50px -14px rgba(8,52,62,.45)" }}>
+        <div className="flex items-center justify-between" style={{ padding: "13px 16px", borderBottom: `1px solid ${C.line}`, background: C.bg, position: "sticky", top: 0 }}>
+          <div className="flex items-center gap-1.5">
+            <Bell size={15} color={C.primary} />
+            <span style={{ fontSize: 14, fontWeight: 800, color: C.ink }}>알림</span>
+            <span style={{ fontSize: 11.5, color: C.sub }}>{notices.length}건</span>
+          </div>
+          <X size={19} color={C.sub} className="cursor-pointer" onClick={onClose} />
+        </div>
+
+        {notices.length === 0 ? (
+          <div className="flex flex-col items-center" style={{ padding: "44px 20px", color: C.sub }}>
+            <div className="flex items-center justify-center" style={{ width: 52, height: 52, borderRadius: 999, background: C.lowSoft, color: C.low, marginBottom: 12 }}><Check size={24} strokeWidth={3} /></div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: C.ink }}>새 알림이 없습니다</div>
+            <div style={{ fontSize: 12, marginTop: 4, textAlign: "center", lineHeight: 1.5 }}>점안·측정·기기 상태가 모두 정상입니다.</div>
+          </div>
+        ) : notices.map((n, i) => (
+          <div key={n.id} onClick={() => { onGo(n.tab); onClose(); }} className="cursor-pointer flex items-start gap-3"
+            style={{ padding: "13px 16px", borderBottom: i < notices.length - 1 ? `1px solid ${C.line}` : "none" }}>
+            <div className="flex items-center justify-center flex-shrink-0" style={{ width: 36, height: 36, borderRadius: 11, background: n.bg, color: n.c }}>
+              <n.icon size={17} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: n.c, background: n.bg, padding: "1px 7px", borderRadius: 99 }}>{n.tag}</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: C.ink }}>{n.title}</span>
+              </div>
+              <div style={{ fontSize: 11.5, color: C.sub, marginTop: 3, lineHeight: 1.45 }}>{n.body}</div>
+            </div>
+            <ChevronRight size={16} color={C.grey} className="flex-shrink-0" style={{ marginTop: 9 }} />
+          </div>
+        ))}
+
+        {notices.length > 0 && (
+          <div style={{ padding: "11px 16px", background: C.bg, fontSize: 10.5, color: C.sub, lineHeight: 1.5 }}>
+            알림을 누르면 해당 화면으로 이동합니다. 푸시 알림은 <b style={{ color: C.primary }}>설정</b>에서 켜고 끌 수 있습니다.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PatientApp() {
   const [account, setAccount] = useState(null);
   const [tab, setTab] = useState("home");
@@ -3143,6 +3998,7 @@ function PatientApp() {
 
   const [escOn, setEscOn] = useState(true);
   const [caregiver, setCaregiver] = useState(false);
+  const [noticeOpen, setNoticeOpen] = useState(false);
   /* 순응도 기반 알림 강화 단계 — 최근 14일 실제 점안 기록으로 판정 */
   const escFrom = isoDate(new Date(new Date(TODAY_REF).setDate(TODAY_REF.getDate() - ADH_ESC_CFG_INIT.window)));
   const adhWin = overallAdherence(escFrom, TODAY_STR, meds);
@@ -3155,7 +4011,8 @@ function PatientApp() {
   const isRental = !!account && (account.owner || "기관") === "기관" && !!account.serial;
   const rent = isRental ? rentAlert(rentTo, isoDate(new Date())) : null;
   const push = usePush(medUp, medOver, rent, bottles, { ...level, caregiver: level.caregiver && caregiver }, escOn);
-  const alertCount = medUp.length + medOver.length + bottles.length + (rent ? 1 : 0);
+  const notices = buildNotices({ medUp, medOver, bottles, rent, level, adhWin, streak });
+  const alertCount = notices.length;
 
   return (
     <div style={{ width: 380, maxWidth: "100%", height: 800, background: C.bg, borderRadius: 40, border: "10px solid #10262B", overflow: "hidden", position: "relative", boxShadow: "0 30px 70px -30px rgba(8,52,62,.5)" }}>
@@ -3179,7 +4036,7 @@ function PatientApp() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <div className="cursor-pointer" style={{ position: "relative" }} onClick={() => setTab("drops")}>
+              <div className="cursor-pointer" style={{ position: "relative" }} onClick={() => setNoticeOpen(true)}>
                 <Bell size={19} color={alertCount ? C.high : C.sub} />
                 {alertCount > 0 && <span className="flex items-center justify-center" style={{ position: "absolute", top: -5, right: -6, minWidth: 15, height: 15, padding: "0 3px", borderRadius: 99, background: C.high, color: "#fff", fontSize: 9.5, fontWeight: 800 }}>{alertCount}</span>}
               </div>
@@ -3207,6 +4064,7 @@ function PatientApp() {
               );
             })}
           </div>
+          {noticeOpen && <NoticePanel notices={notices} onClose={() => setNoticeOpen(false)} onGo={setTab} />}
         </>
       )}
     </div>
@@ -3647,6 +4505,201 @@ function AddPatientForm({ onCancel, onSubmit, devices = [] }) {
   );
 }
 
+
+/* ---------- 목표 안압 변경 ---------- */
+function TargetModal({ p, onClose, onSave }) {
+  const [od, setOd] = useState(p.targetOD);
+  const [os, setOs] = useState(p.targetOS);
+  const [note, setNote] = useState("");
+  const dirty = od !== p.targetOD || os !== p.targetOS;
+  return (
+    <Modal title="목표 안압 변경" onClose={onClose}>
+      <div className="flex items-center gap-2.5" style={{ marginBottom: 14 }}>
+        <div className="flex items-center justify-center flex-shrink-0" style={{ width: 38, height: 38, borderRadius: 12, background: C.mint, color: C.primary }}><Gauge size={19} /></div>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.ink }}>{p.name}</div>
+          <div style={{ fontSize: 11.5, color: C.sub }}>{p.dx} · 현재 OD {p.targetOD} / OS {p.targetOS} mmHg</div>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2.5">
+        {[{ l: "우안 OD", v: od, set: setOd, c: C.od }, { l: "좌안 OS", v: os, set: setOs, c: C.os }].map((t) => (
+          <div key={t.l} className="flex items-center gap-3" style={{ border: `1px solid ${C.line}`, borderRadius: 12, padding: "10px 13px" }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: t.c, width: 62, flexShrink: 0 }}>{t.l}</span>
+            <div className="flex items-center gap-2" style={{ marginLeft: "auto" }}>
+              <button onClick={() => t.set(Math.max(8, t.v - 1))} className="cursor-pointer" style={{ border: `1px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 8, width: 30, height: 30, fontSize: 17, fontWeight: 800, fontFamily: FONT, lineHeight: 1 }}>−</button>
+              <input type="number" min={8} max={30} value={t.v} onChange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) t.set(Math.min(30, Math.max(8, n))); }}
+                style={{ width: 52, textAlign: "center", border: "none", outline: "none", fontSize: 19, fontWeight: 800, color: C.ink, fontFamily: FONT, background: "transparent" }} />
+              <button onClick={() => t.set(Math.min(30, t.v + 1))} className="cursor-pointer" style={{ border: `1px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 8, width: 30, height: 30, fontSize: 17, fontWeight: 800, fontFamily: FONT, lineHeight: 1 }}>＋</button>
+              <span style={{ fontSize: 11, color: C.sub, width: 34, flexShrink: 0 }}>mmHg</span>
+            </div>
+          </div>
+        ))}
+        <Field label="변경 사유 (선택)"><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="예: 시야검사 진행 소견으로 하향 조정" style={inpSm} /></Field>
+        <div style={{ fontSize: 10.5, color: C.sub, lineHeight: 1.5 }}>
+          저장하면 환자 앱의 게이지·추세 목표선·초과 알림에 즉시 반영되고, 변경 이력이 기록됩니다.
+        </div>
+        <div className="flex gap-2.5" style={{ marginTop: 2 }}>
+          <button onClick={onClose} className="cursor-pointer" style={{ flex: 1, border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, fontFamily: FONT }}>취소</button>
+          <button onClick={() => dirty && onSave({ targetOD: od, targetOS: os, note })} disabled={!dirty} className="cursor-pointer"
+            style={{ flex: 2, border: "none", background: dirty ? C.primary : C.mintDeep, color: "#fff", borderRadius: 10, padding: "11px 0", fontSize: 13.5, fontWeight: 800, fontFamily: FONT }}>변경 저장</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------- 진료 보고서 생성 ---------- */
+function ReportModal({ p, from, to, onClose }) {
+  const SECTIONS = [
+    { id: "iop", t: "안압 측정 요약 · 그래프", on: true },
+    { id: "adh", t: "점안 순응도 · 원인 분석", on: true },
+    { id: "ae", t: "부작용 보고", on: true },
+    { id: "survey", t: "전자 문진 12항목", on: false },
+    { id: "wear", t: "워치 활동·수면 데이터", on: false },
+    { id: "device", t: "기기 대여·반납 이력", on: false },
+  ];
+  const [sec, setSec] = useState(SECTIONS.filter((x) => x.on).map((x) => x.id));
+  const [gtype, setGtype] = useState("chart");
+  const [stage, setStage] = useState("form");     // form | making | done
+  const toggle = (id) => setSec((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]));
+  const make = () => { setStage("making"); setTimeout(() => setStage("done"), 1600); };
+
+  return (
+    <Modal title="진료 보고서 생성" onClose={onClose} wide>
+      {stage === "done" ? (
+        <div className="flex flex-col items-center" style={{ padding: "16px 0 6px" }}>
+          <div className="flex items-center justify-center" style={{ width: 54, height: 54, borderRadius: 999, background: C.lowSoft, color: C.low, marginBottom: 12 }}><FileText size={26} /></div>
+          <div style={{ fontSize: 15.5, fontWeight: 800, color: C.ink }}>보고서가 생성되었습니다</div>
+          <div style={{ fontSize: 12, color: C.sub, marginTop: 5, textAlign: "center", lineHeight: 1.55 }}>
+            {p.name} · {from} ~ {to}<br />선택 항목 {sec.length}개 · {(GRAPH_TYPES.find((g) => g.id === gtype) || {}).ko}
+          </div>
+          <div style={{ fontSize: 10.5, color: C.grey, marginTop: 8, fontFamily: "monospace" }}>R-{Math.floor(Math.random() * 9000 + 1000)}_{p.public_id || p.id}.pdf</div>
+          <div className="flex gap-2.5" style={{ width: "100%", marginTop: 18 }}>
+            <button onClick={() => window.print()} className="cursor-pointer flex items-center justify-center gap-1.5"
+              style={{ flex: 1, border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 11, padding: "11px 0", fontSize: 13, fontWeight: 700, fontFamily: FONT }}><FileText size={14} /> 인쇄</button>
+            <button onClick={onClose} className="cursor-pointer flex items-center justify-center gap-1.5"
+              style={{ flex: 2, border: "none", background: C.primary, color: "#fff", borderRadius: 11, padding: "11px 0", fontSize: 13.5, fontWeight: 800, fontFamily: FONT }}><Download size={14} /> 다운로드</button>
+          </div>
+          <div style={{ fontSize: 10, color: C.sub, marginTop: 9, lineHeight: 1.5, textAlign: "center" }}>
+            운영 환경에서는 서버가 PDF를 만들어 15분간 유효한 다운로드 링크를 제공합니다.
+          </div>
+        </div>
+      ) : stage === "making" ? (
+        <div className="flex flex-col items-center" style={{ padding: "40px 0" }}>
+          <RefreshCw size={30} color={C.primary} className="animate-spin" />
+          <div style={{ fontSize: 13.5, fontWeight: 800, color: C.ink, marginTop: 14 }}>보고서를 만들고 있습니다…</div>
+          <div style={{ fontSize: 11.5, color: C.sub, marginTop: 4 }}>측정·점안 데이터를 집계하는 중</div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2.5" style={{ padding: "10px 12px", borderRadius: 11, background: C.bg }}>
+            <User size={16} color={C.primary} className="flex-shrink-0" />
+            <div className="flex-1">
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.ink }}>{p.name} <span style={{ fontSize: 11, color: C.sub, fontWeight: 500 }}>{p.id} · {p.dx}</span></div>
+              <div style={{ fontSize: 11, color: C.sub, marginTop: 1 }}>대상 기간 {from} ~ {to}</div>
+            </div>
+          </div>
+
+          <Field label="포함할 항목">
+            <div className="grid grid-cols-2" style={{ gap: 7 }}>
+              {SECTIONS.map((x) => {
+                const on = sec.includes(x.id);
+                return (
+                  <div key={x.id} onClick={() => toggle(x.id)} className="cursor-pointer flex items-center gap-2"
+                    style={{ border: `1.5px solid ${on ? C.primary : C.line}`, background: on ? C.mint : "#fff", borderRadius: 10, padding: "9px 11px" }}>
+                    <span className="flex items-center justify-center flex-shrink-0" style={{ width: 17, height: 17, borderRadius: 5, border: `1.5px solid ${on ? C.primary : C.line}`, background: on ? C.primary : "#fff" }}>{on && <Check size={11} color="#fff" strokeWidth={3.5} />}</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: C.ink }}>{x.t}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Field>
+
+          <Field label="안압 그래프 형식">
+            <GraphTypeSwitch value={gtype} onChange={setGtype} compact />
+          </Field>
+
+          <div style={{ fontSize: 10.5, color: C.sub, lineHeight: 1.5, background: C.bg, borderRadius: 10, padding: "9px 11px" }}>
+            보고서에는 진단·처방 판단이 포함되지 않으며, 기록된 측정·점안 데이터를 정리해 제공합니다.
+          </div>
+
+          <div className="flex gap-2.5" style={{ marginTop: 2 }}>
+            <button onClick={onClose} className="cursor-pointer" style={{ flex: 1, border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, fontFamily: FONT }}>취소</button>
+            <button onClick={make} disabled={!sec.length} className="cursor-pointer flex items-center justify-center gap-1.5"
+              style={{ flex: 2, border: "none", background: sec.length ? C.primary : C.mintDeep, color: "#fff", borderRadius: 10, padding: "11px 0", fontSize: 13.5, fontWeight: 800, fontFamily: FONT }}><FileText size={14} /> 보고서 생성</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/* ---------- 장치 등록 ---------- */
+function AddDeviceForm({ devices, onCancel, onSubmit }) {
+  const [f, setF] = useState({ name: "", serial: "", model: "CVT200", owner: "org", usage: "home", battery: 100, firmware: "1.4.2" });
+  const set = (k, v) => setF((o) => ({ ...o, [k]: v }));
+  const serialOK = /^CVT2H?-[0-9A-Z]{6,10}$/.test(f.serial.trim());
+  const dup = devices.some((d) => d.serial === f.serial.trim());
+  const ok = f.name.trim() && serialOK && !dup;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex gap-2.5">
+        <Field label="장치명" req><input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="예: 홈 대여기 #5" style={inpSm} /></Field>
+        <Field label="모델">
+          <select value={f.model} onChange={(e) => set("model", e.target.value)} style={inpSm}>
+            <option value="CVT200">CVT200</option>
+            <option value="CVT200 HOME">CVT200 HOME</option>
+          </select>
+        </Field>
+      </div>
+      <Field label="시리얼 번호" req>
+        <input value={f.serial} onChange={(e) => set("serial", e.target.value.toUpperCase())} placeholder="CVT2H-0000AA00"
+          style={{ ...inpSm, fontFamily: "monospace", letterSpacing: "0.04em", borderColor: f.serial ? (ok ? C.low : C.high) : C.line }} />
+        <div style={{ fontSize: 10.5, marginTop: 5, lineHeight: 1.45, color: !f.serial ? C.sub : dup ? C.high : serialOK ? C.low : C.high }}>
+          {!f.serial ? "기기 뒷면 라벨의 시리얼 번호를 입력하세요."
+            : dup ? "이미 등록된 시리얼 번호입니다."
+            : serialOK ? "✓ 등록 가능한 형식입니다." : "형식이 올바르지 않습니다. 예: CVT2H-2033AA11"}
+        </div>
+      </Field>
+      <div className="flex gap-2.5">
+        <Field label="소유 구분" req>
+          <div className="flex" style={{ gap: 5 }}>
+            {[{ id: "org", t: "기관 자산" }, { id: "patient", t: "환자 개인" }].map((o) => (
+              <button key={o.id} onClick={() => set("owner", o.id)} className="cursor-pointer"
+                style={{ flex: 1, border: `1.5px solid ${f.owner === o.id ? C.primary : C.line}`, background: f.owner === o.id ? C.mint : "#fff", color: f.owner === o.id ? C.primary : C.sub, borderRadius: 9, padding: "9px 0", fontSize: 12, fontWeight: 700, fontFamily: FONT }}>{o.t}</button>
+            ))}
+          </div>
+        </Field>
+        <Field label="용도" req>
+          <div className="flex" style={{ gap: 5 }}>
+            {[{ id: "clinic", t: "원내용" }, { id: "home", t: "가정 대여용" }].map((o) => (
+              <button key={o.id} onClick={() => set("usage", o.id)} className="cursor-pointer"
+                style={{ flex: 1, border: `1.5px solid ${f.usage === o.id ? C.primary : C.line}`, background: f.usage === o.id ? C.mint : "#fff", color: f.usage === o.id ? C.primary : C.sub, borderRadius: 9, padding: "9px 0", fontSize: 12, fontWeight: 700, fontFamily: FONT }}>{o.t}</button>
+            ))}
+          </div>
+        </Field>
+      </div>
+      <div className="flex gap-2.5">
+        <Field label="배터리 (%)"><input type="number" min={0} max={100} value={f.battery} onChange={(e) => set("battery", Math.max(0, Math.min(100, +e.target.value)))} style={inpSm} /></Field>
+        <Field label="펌웨어"><input value={f.firmware} onChange={(e) => set("firmware", e.target.value)} style={inpSm} /></Field>
+      </div>
+      <div style={{ fontSize: 10.5, color: C.sub, lineHeight: 1.5, background: C.bg, borderRadius: 9, padding: "9px 11px" }}>
+        기관 자산 · 가정 대여용으로 등록하면 곧바로 <b style={{ color: C.low }}>대여 가능</b> 상태가 되어 환자에게 배정할 수 있습니다.
+      </div>
+      <div className="flex gap-2.5" style={{ marginTop: 2 }}>
+        <button onClick={onCancel} className="cursor-pointer" style={{ flex: 1, border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, fontFamily: FONT }}>취소</button>
+        <button onClick={() => ok && onSubmit({
+          serial: f.serial.trim(), name: f.name.trim(), type: f.model, model: f.model,
+          owner: f.owner === "org" ? "기관" : "개인", use: f.usage, org: "씨엔브이 안과",
+          assignedTo: null, rentFrom: null, rentTo: null, linkedAt: null,
+          battery: f.battery, fw: f.firmware, active: true,
+        })} disabled={!ok} className="cursor-pointer"
+          style={{ flex: 2, border: "none", background: ok ? C.primary : C.mintDeep, color: "#fff", borderRadius: 10, padding: "11px 0", fontSize: 13.5, fontWeight: 800, fontFamily: FONT }}>장치 등록</button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- 환자 상세 ---------- */
 const MEAS_ROWS = [
   { at: "2026-07-03 18:30", dev: "CVT200 HOME", eye: "양안", od: 16.1, os: 15.0, qod: "우수", qos: "우수", src: "수동" },
@@ -3657,9 +4710,9 @@ const MEAS_ROWS = [
   { at: "2026-07-01 07:35", dev: "CVT200 HOME", eye: "양안", od: 18.3, os: 16.6, qod: "양호", qos: "우수", src: "자동" },
 ];
 const RX_ROWS = [
-  { name: "잘타라노 점안액", ingr: "라타노프로스트", maker: "대우제약", dose: "일회용", eye: "양안", sched: "1일 1회 · 취침 전", src: "수기 기록", prn: false, bottle: "4개 남음", bc: C.low },
-  { name: "콤비간 점안액", ingr: "브리모니딘+티몰롤", maker: "한국애브비", dose: "다회용", eye: "양안", sched: "1일 2회 · 08·20시", src: "스마트 디바이스", prn: false, bottle: "폐기 D-3", bc: C.mid },
-  { name: "리안점안액", ingr: "히알루론산 0.15%", maker: "삼일제약", dose: "일회용", eye: "양안", sched: "필요 시", src: "수기 기록", prn: true, bottle: "22개 남음", bc: C.low },
+  { name: "잘타라노 점안액", ingr: "라타노프로스트", maker: "대우제약", dose: "일회용", eye: "양안", sched: "1일 1회 · 취침 전", src: "자동", monitor: "기기1", prn: false, bottle: "4개 남음", bc: C.low },
+  { name: "콤비간 점안액", ingr: "브리모니딘+티몰롤", maker: "한국애브비", dose: "다회용", eye: "양안", sched: "1일 2회 · 08·20시", src: "자동", monitor: "기기2", prn: false, bottle: "폐기 D-3", bc: C.mid },
+  { name: "리안점안액", ingr: "히알루론산 0.15%", maker: "삼일제약", dose: "일회용", eye: "양안", sched: "필요 시", src: "수동", monitor: null, prn: true, bottle: "22개 남음", bc: C.low },
 ];
 const SURVEY_ROWS = [
   { id: "Q1", t: "수면 자세", v: "옆으로 누움 / 베개 겹침", r: "중", g: "옆으로 자면 아래쪽 눈의 안압이 높아질 수 있습니다. 침대 머리를 20~30° 올리도록 안내하세요." },
@@ -3675,7 +4728,7 @@ const SURVEY_ROWS = [
   { id: "Q11", t: "부정맥·AF", v: "진단 없음 + 워치 IRN(미확진)", r: "중", g: "심장내과 심전도(ECG) 확인을 권고하세요." },
   { id: "Q12", t: "음주", v: "주 2~3회 · 2~3잔", r: "중", g: "빈도·양 절주를 권고하세요." },
 ];
-function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend }) {
+function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend, onUpdatePatient, toast }) {
   const [tab, setTab] = useState("iop");
   const [gtype, setGtype] = useState("chart");
   const [eyeF, setEyeF] = useState("both");
@@ -3683,6 +4736,7 @@ function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend }) {
   const [from, setFrom] = useState(RANGE_FROM_DEFAULT);
   const [to, setTo] = useState(RANGE_TO_DEFAULT);
   const [excluded, setExcluded] = useState({});
+  const [modal, setModal] = useState(null);        // "target" | "report"
   const perm = CAN[role];
   const pts = period === "custom" ? trendDataRange(from, to) : trendData(period);
   const gmeta = GRAPH_TYPES.find((g) => g.id === gtype);
@@ -3721,8 +4775,8 @@ function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {perm.editTarget && <button className="cursor-pointer" style={{ border: `1.5px solid ${C.primary}`, background: "#fff", color: C.primary, borderRadius: 9, padding: "7px 12px", fontSize: 12, fontWeight: 700, fontFamily: FONT }}>목표 안압 변경</button>}
-          <button className="cursor-pointer flex items-center gap-1.5" style={{ border: "none", background: C.primary, color: "#fff", borderRadius: 9, padding: "8px 13px", fontSize: 12, fontWeight: 800, fontFamily: FONT }}><FileText size={13} /> 보고서</button>
+          {perm.editTarget && <button onClick={() => setModal("target")} className="cursor-pointer" style={{ border: `1.5px solid ${C.primary}`, background: "#fff", color: C.primary, borderRadius: 9, padding: "7px 12px", fontSize: 12, fontWeight: 700, fontFamily: FONT }}>목표 안압 변경</button>}
+          <button onClick={() => setModal("report")} className="cursor-pointer flex items-center gap-1.5" style={{ border: "none", background: C.primary, color: "#fff", borderRadius: 9, padding: "8px 13px", fontSize: 12, fontWeight: 800, fontFamily: FONT }}><FileText size={13} /> 보고서</button>
         </div>
       </div>
 
@@ -3802,7 +4856,7 @@ function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend }) {
             {perm.rx && <button className="cursor-pointer flex items-center gap-1.5" style={{ border: `1.5px solid ${C.primary}`, background: "#fff", color: C.primary, borderRadius: 9, padding: "6px 12px", fontSize: 11.5, fontWeight: 800, fontFamily: FONT }}><Plus size={12} /> 처방 추가</button>}
           </div>
           <div className="grid" style={{ gridTemplateColumns: "2.2fr 1.1fr 0.7fr 0.7fr 1.4fr 1.1fr 0.8fr", fontSize: 10.5, color: C.sub, fontWeight: 700, padding: "0 4px 8px", borderBottom: `1px solid ${C.line}`, gap: 5 }}>
-            <span>제품 · 성분</span><span>제약회사</span><span>제형</span><span>부위</span><span>용법 · 기록방식</span><span>약병 상태</span><span style={{ textAlign: "right" }}>순응도</span>
+            <span>제품 · 성분</span><span>제약회사</span><span>제형</span><span>부위</span><span>용법 · 기록방식 · 기기</span><span>약병 상태</span><span style={{ textAlign: "right" }}>순응도</span>
           </div>
           {RX_ROWS.map((m, i) => (
             <div key={i} className="grid items-center" style={{ gridTemplateColumns: "2.2fr 1.1fr 0.7fr 0.7fr 1.4fr 1.1fr 0.8fr", gap: 5, padding: "11px 4px", borderBottom: i < RX_ROWS.length - 1 ? `1px solid ${C.line}` : "none" }}>
@@ -3813,7 +4867,13 @@ function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend }) {
               <span style={{ fontSize: 12.5, color: C.ink, fontWeight: 600 }}>{m.maker}</span>
               <span><DoseBadge dose={m.dose} small /></span>
               <span style={{ fontSize: 11.5, color: C.primary, fontWeight: 700 }}>{m.eye}</span>
-              <div><div style={{ fontSize: 12, color: C.ink }}>{m.sched}</div><div style={{ fontSize: 10.5, color: m.src === "스마트 디바이스" ? C.low : C.sub, fontWeight: 600 }}>{m.src}</div></div>
+              <div>
+                <div style={{ fontSize: 12, color: C.ink }}>{m.sched}</div>
+                <div className="flex items-center gap-1" style={{ marginTop: 2 }}>
+                  <span style={{ fontSize: 9.5, fontWeight: 800, color: m.src === "자동" ? C.primary : C.gold, background: m.src === "자동" ? C.mint : C.goldSoft, padding: "1px 6px", borderRadius: 99 }}>{m.src}</span>
+                  {m.monitor && <span className="inline-flex items-center gap-1" style={{ fontSize: 9.5, fontWeight: 700, color: C.sub }}><Bluetooth size={9} /> {m.monitor}</span>}
+                </div>
+              </div>
               <span style={{ fontSize: 11, fontWeight: 700, color: m.bc }}>{m.bottle}</span>
               <div style={{ textAlign: "right" }}>
                 {m.prn ? <span style={{ fontSize: 11.5, color: C.sub }}>필요 시</span> : (() => {
@@ -3930,6 +4990,13 @@ function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend }) {
       )}
 
       {tab === "device" && <DeviceTab p={p} role={role} devices={devices} setDevices={setDevices} myDev={myDev} devSt={devSt} sent={sent} onSend={onSend} />}
+
+      {modal === "target" && (
+        <TargetModal p={p} onClose={() => setModal(null)}
+          onSave={(v) => { onUpdatePatient && onUpdatePatient(p.id, { targetOD: v.targetOD, targetOS: v.targetOS });
+            toast && toast(`${p.name}님 목표 안압을 OD ${v.targetOD} / OS ${v.targetOS} mmHg로 변경했습니다.`); setModal(null); }} />
+      )}
+      {modal === "report" && <ReportModal p={p} from={rFrom} to={rTo} onClose={() => setModal(null)} />}
 
       {tab === "profile" && (
         <div className="grid grid-cols-2" style={{ gap: 12 }}>
@@ -4125,10 +5192,11 @@ function DeviceTab({ p, role, devices, setDevices, myDev, devSt, sent = {}, onSe
 }
 
 /* ---------- 장치 목록 ---------- */
-function DevicesPage({ role, devices, setDevices, patients }) {
+function DevicesPage({ role, devices, setDevices, patients, toast }) {
   const [q, setQ] = useState("");
   const [filt, setFilt] = useState("all");
   const [sort, setSort] = useState({ k: "name", dir: "asc" });
+  const [add, setAdd] = useState(false);
   const pName = (id) => (patients.find((x) => x.id === id) || {}).name || "-";
   const kpi = useMemo(() => {
     const home = devices.filter((d) => d.use === "home" && d.active);
@@ -4180,8 +5248,15 @@ function DevicesPage({ role, devices, setDevices, patients }) {
             ))}
           </div>
         </div>
-        <button className="cursor-pointer flex items-center gap-1.5" style={{ border: "none", borderRadius: 10, padding: "9px 15px", background: C.primary, color: "#fff", fontSize: 12.5, fontWeight: 800, fontFamily: FONT }}><Plus size={14} /> 장치 등록</button>
+        <button onClick={() => setAdd(true)} className="cursor-pointer flex items-center gap-1.5" style={{ border: "none", borderRadius: 10, padding: "9px 15px", background: C.primary, color: "#fff", fontSize: 12.5, fontWeight: 800, fontFamily: FONT }}><Plus size={14} /> 장치 등록</button>
       </div>
+
+      {add && (
+        <Modal title="장치 등록" onClose={() => setAdd(false)} wide>
+          <AddDeviceForm devices={devices} onCancel={() => setAdd(false)}
+            onSubmit={(d) => { setDevices((ds) => [...ds, d]); setAdd(false); toast && toast(`${d.name} 장치를 등록했습니다.`); }} />
+        </Modal>
+      )}
       <div className="grid" style={{ gridTemplateColumns: COLS, fontSize: 10.5, padding: "0 6px 8px", borderBottom: `1px solid ${C.line}`, gap: 6 }}>
         <SortHead label="장치명" k="name" sort={sort} setSort={setSort} />
         <SortHead label="소유 구분" k="owner" sort={sort} setSort={setSort} />
@@ -4219,7 +5294,7 @@ function DevicesPage({ role, devices, setDevices, patients }) {
 }
 
 /* ---------- 알림 자동화 (스케줄러 · 감사 로그) ---------- */
-function NotifyPage({ role, cfg, setCfg, log, alerts, lastRun, onRunBatch, escCfg, setEscCfg, patients, onSendAdh, onOpenPatient }) {
+function NotifyPage({ role, cfg, setCfg, log, alerts, lastRun, lastResult, onRunBatch, escCfg, setEscCfg, patients, onSendAdh, onOpenPatient }) {
   const [sub, setSub] = useState("sched");
   const canEdit = CAN[role].notifyEdit, canRun = CAN[role].runBatch;
   const [q, setQ] = useState(""); const [fRes, setFRes] = useState("all"); const [fLevel, setFLevel] = useState("all");
@@ -4293,9 +5368,32 @@ function NotifyPage({ role, cfg, setCfg, log, alerts, lastRun, onRunBatch, escCf
               ))}
             </div>
             <div className="flex items-center gap-2" style={{ padding: "12px 17px", borderTop: `1px solid ${C.line}` }}>
-              <button onClick={onRunBatch} disabled={!canRun || !alerts.length} className="cursor-pointer flex items-center gap-1.5" style={{ border: "none", borderRadius: 10, padding: "9px 15px", fontSize: 12.5, fontWeight: 800, fontFamily: FONT, background: canRun && alerts.length ? C.primary : C.mintDeep, color: canRun && alerts.length ? "#fff" : C.sub }}><Play size={13} /> 지금 배치 실행</button>
-              <span style={{ fontSize: 10.5, color: C.sub }}>{canRun ? "예약 시각을 기다리지 않고 대상 전체에 즉시 발송합니다." : "배치 수동 실행은 의사·관리자 권한입니다."}</span>
+              <button onClick={() => { onRunBatch(); setSub("sched"); }} disabled={!canRun || !alerts.length} className="cursor-pointer flex items-center gap-1.5"
+                style={{ border: "none", borderRadius: 10, padding: "9px 15px", fontSize: 12.5, fontWeight: 800, fontFamily: FONT, background: canRun && alerts.length ? C.primary : C.mintDeep, color: canRun && alerts.length ? "#fff" : C.sub }}>
+                <Play size={13} /> 지금 배치 실행
+              </button>
+              <span style={{ fontSize: 10.5, color: C.sub }}>
+                {!canRun ? "배치 수동 실행은 의사·관리자 권한입니다."
+                  : !alerts.length ? "현재 발송 대상이 없습니다."
+                  : `대상 ${alerts.length}건에 즉시 발송합니다.`}
+              </span>
             </div>
+
+            {lastResult && (
+              <div className="flex items-center gap-3" style={{ padding: "12px 17px", borderTop: `1px solid ${C.line}`, background: C.lowSoft }}>
+                <div className="flex items-center justify-center flex-shrink-0" style={{ width: 32, height: 32, borderRadius: 10, background: "#fff", color: C.low }}><PackageCheck size={16} /></div>
+                <div className="flex-1">
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink }}>배치 실행 완료 · {lastResult.sent}건 발송</div>
+                  <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>
+                    {lastResult.at} · {lastResult.detail || "감사 로그에 기록되었습니다."}
+                  </div>
+                </div>
+                <button onClick={() => setSub("log")} className="cursor-pointer flex items-center gap-1"
+                  style={{ border: `1px solid ${C.low}45`, background: "#fff", color: C.low, borderRadius: 8, padding: "6px 11px", fontSize: 11, fontWeight: 800, fontFamily: FONT }}>
+                  <History size={11} /> 로그 보기
+                </button>
+              </div>
+            )}
           </Card>
 
           <Card style={{ padding: 16 }}>
@@ -4633,6 +5731,7 @@ function ClinicianWeb() {
   const [escCfg, setEscCfg] = useState(ADH_ESC_CFG_INIT);
   const [audit, setAudit] = useState(AUDIT_INIT);
   const [lastRun, setLastRun] = useState("2026-07-03 09:00");
+  const [lastResult, setLastResult] = useState(null);
   const [toast, setToast] = useState("");
   const [open, setOpen] = useState(null);
 
@@ -4676,14 +5775,23 @@ function ClinicianWeb() {
 
   const runBatch = () => {
     let n = 0;
-    alerts.forEach((x) => { if (writeLog(x.dev, x.a, "자동", "스케줄러")) n += 1; });
-    setLastRun(stampNow()); setReadAlerts([]);
+    const names = [];
+    alerts.forEach((x) => {
+      if (writeLog(x.dev, x.a, "자동", "스케줄러")) { n += 1; if (x.pt) names.push(`${x.pt.name}(${x.a.title})`); }
+    });
+    const at = stampNow();
+    setLastRun(at); setReadAlerts([]);
+    setLastResult({ sent: n, at, detail: n ? names.join(" · ") : "설정된 발송 채널이 없어 실제 발송은 없었습니다." });
     flashToast(n ? `배치 실행 완료 · ${n}건 발송, 감사 로그에 기록했습니다.` : "발송 대상이 없습니다.");
   };
   const extendRent = (serial, days) => {
     setDevices((ds) => ds.map((d) => { if (d.serial !== serial) return d; const nd = new Date(d.rentTo); nd.setDate(nd.getDate() + days); return { ...d, rentTo: isoDate(nd) }; }));
     setReadAlerts((r) => r.filter((x) => x !== serial));
     flashToast(`반납 예정일을 ${days}일 연장했습니다.`);
+  };
+  const updatePatient = (pid, patch) => {
+    setPatients((ps) => ps.map((x) => (x.id === pid ? { ...x, ...patch } : x)));
+    setOpen((o) => (o && o.id === pid ? { ...o, ...patch } : o));
   };
   const returnDev = (serial) => {
     setDevices((ds) => ds.map((d) => (d.serial === serial ? { ...d, assignedTo: null, rentFrom: null, rentTo: null } : d)));
@@ -4770,10 +5878,10 @@ function ClinicianWeb() {
       </div>
 
       {nav === "patients" && (open
-        ? <PatientDetail p={open} role={role} onBack={() => setOpen(null)} devices={devices} setDevices={setDevices} sent={sentLog} onSend={sendNotice} />
+        ? <PatientDetail p={open} role={role} onBack={() => setOpen(null)} devices={devices} setDevices={setDevices} sent={sentLog} onSend={sendNotice} onUpdatePatient={updatePatient} toast={flashToast} />
         : <PatientsPage role={role} patients={patients} setPatients={setPatients} onOpen={setOpen} devices={devices} setDevices={setDevices} alerts={alerts} />)}
-      {nav === "devices" && <DevicesPage role={role} devices={devices} setDevices={setDevices} patients={patients} />}
-      {nav === "notif" && <NotifyPage role={role} cfg={cfg} setCfg={setCfg} log={audit} alerts={alerts} lastRun={lastRun} onRunBatch={runBatch}
+      {nav === "devices" && <DevicesPage role={role} devices={devices} setDevices={setDevices} patients={patients} toast={flashToast} />}
+      {nav === "notif" && <NotifyPage role={role} cfg={cfg} setCfg={setCfg} log={audit} alerts={alerts} lastRun={lastRun} lastResult={lastResult} onRunBatch={runBatch}
         escCfg={escCfg} setEscCfg={setEscCfg} patients={patients} onSendAdh={sendAdhNotice} onOpenPatient={(pt) => { setNav("patients"); setOpen(pt); }} />}
       {nav === "users" && <UsersPage role={role} users={users} setUsers={setUsers} />}
       {nav === "perm" && <PermissionPage role={role} />}
@@ -4785,7 +5893,7 @@ function ClinicianWeb() {
       {modal === "profile" && <ProfileModal me={me} onClose={() => setModal(null)} onSave={(f) => { const next = { ...me, ...f }; setSession(next); setUsers((us) => us.map((u) => (u.id === me.id ? next : u))); setModal(null); }} />}
       {modal === "password" && <PasswordModal onClose={() => setModal(null)} />}
       {toast && (
-        <div className="flex items-center gap-2" style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 22, background: C.ink, color: "#fff", borderRadius: 12, padding: "11px 18px", fontSize: 12.5, fontWeight: 700, boxShadow: "0 12px 30px -8px rgba(8,52,62,.5)", zIndex: 50 }}>
+        <div className="flex items-center gap-2" style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", top: 70, background: C.ink, color: "#fff", borderRadius: 12, padding: "11px 18px", fontSize: 12.5, fontWeight: 700, boxShadow: "0 12px 30px -8px rgba(8,52,62,.5)", zIndex: 50 }}>
           <PackageCheck size={15} color={C.mintDeep} /> {toast}
         </div>
       )}
