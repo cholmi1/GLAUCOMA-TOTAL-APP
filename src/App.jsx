@@ -4549,39 +4549,272 @@ function TargetModal({ p, onClose, onSave }) {
 }
 
 /* ---------- 진료 보고서 생성 ---------- */
+/* ---------- 보고서 데이터 구성 · HTML/TEXT 렌더 ---------- */
+const REPORT_SECTIONS = [
+  { id: "iop", t: "안압 측정 요약 · 그래프", on: true },
+  { id: "adh", t: "점안 순응도 · 원인 분석", on: true },
+  { id: "ae", t: "부작용 보고", on: true },
+  { id: "survey", t: "전자 문진 12항목", on: false },
+  { id: "wear", t: "워치 활동·수면 데이터", on: false },
+  { id: "device", t: "기기 대여·반납 이력", on: false },
+];
+function buildReportData(p, from, to, sec, gtype) {
+  const pts = trendDataRange(from, to);
+  const mean = (a) => (a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : 0);
+  const blocks = [];
+
+  if (sec.includes("iop")) {
+    const odAvg = mean(pts.map((x) => x.odAvg)), osAvg = mean(pts.map((x) => x.osAvg));
+    const peak = Math.max(...pts.map((x) => x.odMax));
+    const overDays = pts.filter((x) => x.odAvg > p.targetOD).length;
+    const flucAvg = mean(pts.map((x) => x.fluc));
+    blocks.push({ h: "1. 안압 측정 요약", kv: [
+      ["측정 기간", `${from} ~ ${to}`],
+      ["총 측정 횟수", `${pts.reduce((a, x) => a + x.cnt, 0)}회`],
+      ["우안(OD) 평균", `${odAvg} mmHg (목표 ${p.targetOD})`],
+      ["좌안(OS) 평균", `${osAvg} mmHg (목표 ${p.targetOS})`],
+      ["기간 최고 안압", `${peak.toFixed(1)} mmHg`],
+      ["목표 초과일", `${overDays}일 / ${pts.length}일 (${Math.round((overDays / pts.length) * 100)}%)`],
+      ["평균 일중 변동폭", `${flucAvg} mmHg (5 이상 주의)`],
+      ["그래프 형식", (GRAPH_TYPES.find((g) => g.id === gtype) || {}).ko],
+    ]});
+    blocks.push({ h: "1-1. 일자별 안압 추이", table: {
+      head: ["일자", "우안 평균", "우안 최소~최대", "좌안 평균", "측정 횟수", "점안 순응도"],
+      rows: pts.map((x) => [x.d, x.odAvg, `${x.odMin} ~ ${x.odMax}`, x.osAvg, `${x.cnt}회`, `${x.adh}%`]),
+    }});
+    blocks.push({ h: "1-2. 최근 측정 이력", table: {
+      head: ["측정 시각", "기기", "측정 눈", "IOP(OD)", "품질", "IOP(OS)", "품질", "기록"],
+      rows: MEAS_ROWS.map((r) => [r.at, r.dev, r.eye, r.od == null ? "–" : r.od.toFixed(1), r.qod, r.os == null ? "–" : r.os.toFixed(1), r.qos, r.src]),
+    }});
+  }
+
+  if (sec.includes("adh")) {
+    const all = overallAdherence(from, to);
+    const byMed = adherenceByMed(from, to);
+    const bySlot = adherenceBySlot(from, to);
+    const { causes } = rootCauses(from, to, MEDS_INIT);
+    blocks.push({ h: "2. 점안 순응도", kv: [
+      ["기간 평균 순응도", `${all.pct}% (${all.taken}/${all.total}회)`],
+      ["누락 횟수", `${all.missed}회`],
+      ["목표 기준", `${ADH_TARGET}% 이상`],
+    ]});
+    blocks.push({ h: "2-1. 약제별 순응도", table: {
+      head: ["약제", "예정", "실행", "순응도"],
+      rows: byMed.map((m) => [m.key, `${m.total}회`, `${m.taken}회`, `${m.pct}%`]),
+    }});
+    blocks.push({ h: "2-2. 투약 시각별 순응도", table: {
+      head: ["투약 시각", "예정", "실행", "순응도"],
+      rows: bySlot.map((m) => [m.key, `${m.total}회`, `${m.taken}회`, `${m.pct}%`]),
+    }});
+    blocks.push({ h: "2-3. 처방 점안제", table: {
+      head: ["제품 · 성분", "제약회사", "제형", "부위", "용법", "기록 방식", "약병 상태"],
+      rows: RX_ROWS.map((r) => [`${r.name} (${r.ingr})`, r.maker, r.dose, r.eye, r.sched, `${r.src}${r.monitor ? " · " + r.monitor : ""}`, r.bottle]),
+    }});
+    if (causes.length) blocks.push({ h: "2-4. 순응도 저하 추정 원인", list:
+      causes.slice(0, 5).map((c, i) => `${i + 1}. [${c.cat}] ${c.title} (영향도 −${c.impact}%p)\n    근거: ${c.detail}\n    권고: ${c.action}`),
+      note: "인과 판정이 아니라 기록 대조를 통한 연관성 제시입니다.",
+    });
+  }
+
+  if (sec.includes("ae")) {
+    blocks.push({ h: "3. 부작용 보고", table: {
+      head: ["보고 일시", "약제", "부위", "증상", "정도", "비고"],
+      rows: SE_LOG_INIT.map((e) => [e.at, e.med, EYE_LABEL[e.eye], e.items.join(", "), e.severity, e.note || "-"]),
+    }});
+  }
+
+  if (sec.includes("survey")) {
+    blocks.push({ h: "4. 전자 문진 12항목", table: {
+      head: ["번호", "항목", "응답", "위험도"],
+      rows: SURVEY_ROWS.map((r) => [r.id, r.t, r.v, (RISK[r.r] || {}).label || "-"]),
+    }});
+  }
+
+  if (sec.includes("wear")) {
+    blocks.push({ h: "5. 워치 활동 · 수면", table: {
+      head: ["지표", "값", "참고"],
+      rows: [["걸음 수", "6,420 걸음", "7일 평균 7,100"], ["수면 시간", "6시간 40분", "자주 깸 · 질 보통"],
+             ["안정 시 심박", "72 bpm", "정상 범위"], ["불규칙 맥박(IRN)", "감지", "6/30 · 미확진"]],
+    }});
+  }
+
+  if (sec.includes("device")) {
+    blocks.push({ h: "6. 기기 대여 · 반납 이력", table: {
+      head: ["항목", "내용"],
+      rows: [["기기 시리얼", p.serial || "-"], ["소유 구분", "병원 대여"], ["사용 기간", p.period || "-"],
+             ["현재 상태", deviceState(DEVICES_INIT.find((d) => d.serial === p.serial)).label]],
+    }});
+  }
+
+  return {
+    title: "녹내장 관리 진료 보고서",
+    org: "씨엔브이 안과 · 안압케어 CLINIC",
+    patient: [["환자명", p.name], ["환자 ID", p.id], ["성별 · 생년월일", `${p.gender} · ${p.birth || "-"}`],
+              ["진단명", p.dx], ["목표 안압", `OD ${p.targetOD} / OS ${p.targetOS} mmHg`], ["대상 기간", `${from} ~ ${to}`]],
+    issuedAt: `${isoDate(new Date())} ${nowHM()}`,
+    blocks,
+  };
+}
+function reportHtml(d) {
+  const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const kv = (rows) => `<table class="kv">${rows.map((r) => `<tr><th>${esc(r[0])}</th><td>${esc(r[1])}</td></tr>`).join("")}</table>`;
+  const tbl = (t) => `<table class="d"><thead><tr>${t.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>`
+    + `<tbody>${t.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const body = d.blocks.map((b) => `<section><h2>${esc(b.h)}</h2>`
+    + (b.kv ? kv(b.kv) : "")
+    + (b.table ? tbl(b.table) : "")
+    + (b.list ? `<ol class="cs">${b.list.map((x) => `<li>${esc(x).replace(/\n/g, "<br>")}</li>`).join("")}</ol>` : "")
+    + (b.note ? `<p class="note">${esc(b.note)}</p>` : "") + `</section>`).join("");
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<title>${esc(d.title)} - ${esc(d.patient[0][1])}</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#0A2A31;margin:0;padding:28px 30px;background:#fff;font-size:12px;line-height:1.6}
+header{border-bottom:2px solid #0E5563;padding-bottom:12px;margin-bottom:16px}
+h1{font-size:19px;margin:0 0 4px;color:#0E5563}
+.org{font-size:11px;color:#5E7A7C}
+.issued{font-size:10px;color:#8AA0A1;margin-top:6px}
+h2{font-size:13px;margin:20px 0 8px;color:#0A2A31;border-left:4px solid #3EA6A6;padding-left:8px}
+table{width:100%;border-collapse:collapse;margin-bottom:6px}
+.kv th{width:130px;text-align:left;background:#F3F7F6;color:#5E7A7C;font-weight:700;padding:6px 10px;border:1px solid #E2EAE9;font-size:11px}
+.kv td{padding:6px 10px;border:1px solid #E2EAE9;font-size:11.5px}
+.d th{background:#0E5563;color:#fff;font-size:10.5px;padding:6px 8px;border:1px solid #0E5563;text-align:left}
+.d td{padding:5px 8px;border:1px solid #E2EAE9;font-size:11px}
+.d tbody tr:nth-child(even){background:#F8FBFA}
+.cs{padding-left:18px;font-size:11.5px}
+.cs li{margin-bottom:8px}
+.note{font-size:10.5px;color:#5E7A7C;background:#F3F7F6;padding:8px 10px;border-radius:6px;margin-top:4px}
+footer{margin-top:26px;padding-top:12px;border-top:1px solid #E2EAE9;font-size:10px;color:#8AA0A1;line-height:1.7}
+@media print{body{padding:0}section{page-break-inside:avoid}}
+</style></head><body>
+<header><h1>${esc(d.title)}</h1><div class="org">${esc(d.org)}</div><div class="issued">발행 ${esc(d.issuedAt)}</div></header>
+<section><h2>환자 정보</h2>${kv(d.patient)}</section>
+${body}
+<footer>본 보고서는 기록된 측정·점안 데이터를 정리한 자료이며 진단·처방 판단을 포함하지 않습니다.<br>
+임상적 판단은 의료진의 소견과 함께 이루어져야 합니다. · C&amp;V Tech 안압케어</footer>
+</body></html>`;
+}
+function reportText(d) {
+  const line = "=".repeat(56);
+  const kv = (rows) => rows.map((r) => `  ${String(r[0]).padEnd(16, " ")}: ${r[1]}`).join("\n");
+  const tbl = (t) => [t.head.join(" | "), "-".repeat(56), ...t.rows.map((r) => r.join(" | "))].join("\n");
+  const body = d.blocks.map((b) => [`\n[${b.h}]`, b.kv ? kv(b.kv) : "", b.table ? tbl(b.table) : "",
+    b.list ? b.list.join("\n") : "", b.note ? `  * ${b.note}` : ""].filter(Boolean).join("\n")).join("\n");
+  return [line, `  ${d.title}`, `  ${d.org}`, `  발행 ${d.issuedAt}`, line,
+    "\n[환자 정보]", kv(d.patient), body, "\n" + line,
+    "본 보고서는 기록된 측정·점안 데이터를 정리한 자료이며 진단·처방 판단을 포함하지 않습니다.", line].join("\n");
+}
+function downloadBlob(text, filename, mime) {
+  try {
+    const blob = new Blob(["\uFEFF" + text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    return true;
+  } catch (e) { return false; }
+}
+
 function ReportModal({ p, from, to, onClose }) {
-  const SECTIONS = [
-    { id: "iop", t: "안압 측정 요약 · 그래프", on: true },
-    { id: "adh", t: "점안 순응도 · 원인 분석", on: true },
-    { id: "ae", t: "부작용 보고", on: true },
-    { id: "survey", t: "전자 문진 12항목", on: false },
-    { id: "wear", t: "워치 활동·수면 데이터", on: false },
-    { id: "device", t: "기기 대여·반납 이력", on: false },
-  ];
-  const [sec, setSec] = useState(SECTIONS.filter((x) => x.on).map((x) => x.id));
+  const [sec, setSec] = useState(REPORT_SECTIONS.filter((x) => x.on).map((x) => x.id));
   const [gtype, setGtype] = useState("chart");
-  const [stage, setStage] = useState("form");     // form | making | done
+  const [stage, setStage] = useState("form");        // form | making | done
+  const [fmt, setFmt] = useState("pdf");
+  const [preview, setPreview] = useState(false);
+  const [msg, setMsg] = useState("");
+  const frame = useRef(null);
   const toggle = (id) => setSec((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]));
-  const make = () => { setStage("making"); setTimeout(() => setStage("done"), 1600); };
+  const make = () => { setStage("making"); setTimeout(() => setStage("done"), 1400); };
+
+  const data = useMemo(() => (stage === "done" ? buildReportData(p, from, to, sec, gtype) : null), [stage, p, from, to, sec, gtype]);
+  const html = data ? reportHtml(data) : "";
+  const base = `안압케어_진료보고서_${p.name}_${from}_${to}`;
+  const flash = (t) => { setMsg(t); setTimeout(() => setMsg(""), 2600); };
+
+  const doPrint = () => {
+    try { frame.current.contentWindow.focus(); frame.current.contentWindow.print(); }
+    catch (e) { flash("이 환경에서는 인쇄 창을 열 수 없습니다. HTML로 내려받아 브라우저에서 인쇄하세요."); }
+  };
+  const doDownload = () => {
+    if (fmt === "html") {
+      flash(downloadBlob(html, `${base}.html`, "text/html;charset=utf-8") ? "HTML 파일을 내려받았습니다." : "다운로드가 차단되었습니다. 미리보기에서 내용을 복사하세요.");
+    } else if (fmt === "txt") {
+      flash(downloadBlob(reportText(data), `${base}.txt`, "text/plain;charset=utf-8") ? "텍스트 파일을 내려받았습니다." : "다운로드가 차단되었습니다.");
+    } else {
+      if (!preview) setPreview(true);
+      setTimeout(doPrint, 400);
+      flash("인쇄 창에서 대상을 'PDF로 저장'으로 선택하세요.");
+    }
+  };
+
+  const FMTS = [
+    { id: "pdf", t: "PDF", d: "인쇄 → PDF로 저장", icon: FileText },
+    { id: "html", t: "HTML", d: "웹 문서 파일", icon: Globe },
+    { id: "txt", t: "TEXT", d: "텍스트 파일", icon: ListChecks },
+  ];
 
   return (
     <Modal title="진료 보고서 생성" onClose={onClose} wide>
       {stage === "done" ? (
-        <div className="flex flex-col items-center" style={{ padding: "16px 0 6px" }}>
-          <div className="flex items-center justify-center" style={{ width: 54, height: 54, borderRadius: 999, background: C.lowSoft, color: C.low, marginBottom: 12 }}><FileText size={26} /></div>
-          <div style={{ fontSize: 15.5, fontWeight: 800, color: C.ink }}>보고서가 생성되었습니다</div>
-          <div style={{ fontSize: 12, color: C.sub, marginTop: 5, textAlign: "center", lineHeight: 1.55 }}>
-            {p.name} · {from} ~ {to}<br />선택 항목 {sec.length}개 · {(GRAPH_TYPES.find((g) => g.id === gtype) || {}).ko}
+        <div className="flex flex-col" style={{ paddingTop: 4 }}>
+          <div className="flex flex-col items-center">
+            <div className="flex items-center justify-center" style={{ width: 52, height: 52, borderRadius: 999, background: C.lowSoft, color: C.low, marginBottom: 11 }}><FileText size={25} /></div>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: C.ink }}>보고서가 생성되었습니다</div>
+            <div style={{ fontSize: 12, color: C.sub, marginTop: 5, textAlign: "center", lineHeight: 1.55 }}>
+              {p.name} · {from} ~ {to}<br />선택 항목 {sec.length}개 · {(GRAPH_TYPES.find((g) => g.id === gtype) || {}).ko}
+            </div>
           </div>
-          <div style={{ fontSize: 10.5, color: C.grey, marginTop: 8, fontFamily: "monospace" }}>R-{Math.floor(Math.random() * 9000 + 1000)}_{p.public_id || p.id}.pdf</div>
-          <div className="flex gap-2.5" style={{ width: "100%", marginTop: 18 }}>
-            <button onClick={() => window.print()} className="cursor-pointer flex items-center justify-center gap-1.5"
-              style={{ flex: 1, border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 11, padding: "11px 0", fontSize: 13, fontWeight: 700, fontFamily: FONT }}><FileText size={14} /> 인쇄</button>
-            <button onClick={onClose} className="cursor-pointer flex items-center justify-center gap-1.5"
-              style={{ flex: 2, border: "none", background: C.primary, color: "#fff", borderRadius: 11, padding: "11px 0", fontSize: 13.5, fontWeight: 800, fontFamily: FONT }}><Download size={14} /> 다운로드</button>
+
+          {/* 미리보기 */}
+          {preview && (
+            <div style={{ marginTop: 14, border: `1px solid ${C.line}`, borderRadius: 12, overflow: "hidden" }}>
+              <div className="flex items-center justify-between" style={{ padding: "8px 12px", background: C.bg, borderBottom: `1px solid ${C.line}` }}>
+                <span className="flex items-center gap-1.5" style={{ fontSize: 11.5, fontWeight: 800, color: C.primary }}><Eye size={12} /> HTML 미리보기</span>
+                <div className="flex items-center gap-2">
+                  <span onClick={doPrint} className="cursor-pointer flex items-center gap-1" style={{ fontSize: 11, fontWeight: 700, color: C.sub }}><FileText size={11} /> 인쇄</span>
+                  <span onClick={() => setPreview(false)} className="cursor-pointer" style={{ fontSize: 11, fontWeight: 700, color: C.sub }}>닫기</span>
+                </div>
+              </div>
+              <iframe ref={frame} title="report-preview" srcDoc={html} style={{ width: "100%", height: 360, border: "none", background: "#fff" }} />
+            </div>
+          )}
+
+          {/* 다운로드 형식 */}
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: C.sub, marginBottom: 7 }}>다운로드 형식</div>
+            <div className="flex" style={{ gap: 7 }}>
+              {FMTS.map((f) => {
+                const on = fmt === f.id;
+                return (
+                  <div key={f.id} onClick={() => setFmt(f.id)} className="cursor-pointer flex flex-col items-center"
+                    style={{ flex: 1, border: `1.5px solid ${on ? C.primary : C.line}`, background: on ? C.mint : "#fff", borderRadius: 12, padding: "11px 6px" }}>
+                    <f.icon size={16} color={on ? C.primary : C.sub} />
+                    <div style={{ fontSize: 12.5, fontWeight: 800, color: on ? C.primary : C.ink, marginTop: 4 }}>{f.t}</div>
+                    <div style={{ fontSize: 9.5, color: C.sub, marginTop: 1 }}>{f.d}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {msg && (
+            <div className="flex items-center gap-2" style={{ marginTop: 11, background: C.mint, borderRadius: 10, padding: "9px 12px", fontSize: 11.5, color: C.ink, fontWeight: 600 }}>
+              <Info size={13} color={C.primary} className="flex-shrink-0" /> {msg}
+            </div>
+          )}
+
+          <div className="flex gap-2.5" style={{ marginTop: 14 }}>
+            <button onClick={() => setPreview((v) => !v)} className="cursor-pointer flex items-center justify-center gap-1.5"
+              style={{ flex: 1, border: `1.5px solid ${C.primary}`, background: "#fff", color: C.primary, borderRadius: 11, padding: "11px 0", fontSize: 13, fontWeight: 800, fontFamily: FONT }}>
+              <Eye size={14} /> {preview ? "미리보기 닫기" : "미리보기"}
+            </button>
+            <button onClick={doDownload} className="cursor-pointer flex items-center justify-center gap-1.5"
+              style={{ flex: 2, border: "none", background: C.primary, color: "#fff", borderRadius: 11, padding: "11px 0", fontSize: 13.5, fontWeight: 800, fontFamily: FONT }}>
+              <Download size={14} /> {FMTS.find((f) => f.id === fmt).t}로 다운로드
+            </button>
           </div>
           <div style={{ fontSize: 10, color: C.sub, marginTop: 9, lineHeight: 1.5, textAlign: "center" }}>
-            운영 환경에서는 서버가 PDF를 만들어 15분간 유효한 다운로드 링크를 제공합니다.
+            파일명 {base}.{fmt === "txt" ? "txt" : fmt} · 운영 환경에서는 서버가 PDF를 생성해 15분간 유효한 링크를 제공합니다.
           </div>
         </div>
       ) : stage === "making" ? (
@@ -4599,10 +4832,9 @@ function ReportModal({ p, from, to, onClose }) {
               <div style={{ fontSize: 11, color: C.sub, marginTop: 1 }}>대상 기간 {from} ~ {to}</div>
             </div>
           </div>
-
           <Field label="포함할 항목">
             <div className="grid grid-cols-2" style={{ gap: 7 }}>
-              {SECTIONS.map((x) => {
+              {REPORT_SECTIONS.map((x) => {
                 const on = sec.includes(x.id);
                 return (
                   <div key={x.id} onClick={() => toggle(x.id)} className="cursor-pointer flex items-center gap-2"
@@ -4614,15 +4846,10 @@ function ReportModal({ p, from, to, onClose }) {
               })}
             </div>
           </Field>
-
-          <Field label="안압 그래프 형식">
-            <GraphTypeSwitch value={gtype} onChange={setGtype} compact />
-          </Field>
-
+          <Field label="안압 그래프 형식"><GraphTypeSwitch value={gtype} onChange={setGtype} compact /></Field>
           <div style={{ fontSize: 10.5, color: C.sub, lineHeight: 1.5, background: C.bg, borderRadius: 10, padding: "9px 11px" }}>
             보고서에는 진단·처방 판단이 포함되지 않으며, 기록된 측정·점안 데이터를 정리해 제공합니다.
           </div>
-
           <div className="flex gap-2.5" style={{ marginTop: 2 }}>
             <button onClick={onClose} className="cursor-pointer" style={{ flex: 1, border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, fontFamily: FONT }}>취소</button>
             <button onClick={make} disabled={!sec.length} className="cursor-pointer flex items-center justify-center gap-1.5"
