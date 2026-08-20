@@ -130,6 +130,7 @@ Node.js 18 이상이 필요합니다.
 
 | 문서 | 내용 |
 |---|---|
+| [developer-guide.md](docs/developer-guide.md) | 개발 로드맵, 모듈 분리, 목업→실데이터 교체 지점, BLE 연동, 테스트 |
 | [backend-architecture.md](docs/backend-architecture.md) | 시스템 구성, 테넌시, 인증·인가, 측정 수집, 국가별 규제, 보안, 배치 |
 | [db-schema.md](docs/db-schema.md) | PostgreSQL 스키마 DDL, ERD, 인덱스, 집계 전략, 보존 정책 |
 | [api-spec.md](docs/api-spec.md) | REST API 엔드포인트, 요청·응답 예시, 오류 코드, 레이트리밋 |
@@ -144,6 +145,7 @@ Node.js 18 이상이 필요합니다.
 ├─ package.json
 ├─ vite.config.js
 ├─ docs/
+│  ├─ developer-guide.md           # 개발자 가이드
 │  ├─ backend-architecture.md      # 백엔드 아키텍처
 │  ├─ db-schema.md                 # DB 스키마 (PostgreSQL)
 │  ├─ api-spec.md                  # REST API 명세

@@ -4549,6 +4549,83 @@ function TargetModal({ p, onClose, onSave }) {
 }
 
 /* ---------- 진료 보고서 생성 ---------- */
+
+/* ---------- 환자 정보 편집 ---------- */
+function EditPatientModal({ p, onClose, onSave }) {
+  const [f, setF] = useState({
+    name: p.name, gender: p.gender, birth: p.birth || "", phone: p.phone || "",
+    email: p.email === "-" ? "" : (p.email || ""), loginId: p.loginId || "", dx: p.dx || "",
+  });
+  const set = (k, v) => setF((o) => ({ ...o, [k]: v }));
+  const ok = f.name.trim() && f.phone.trim();
+  const dirty = ["name", "gender", "birth", "phone", "email", "loginId", "dx"]
+    .some((k) => (f[k] || "") !== ((k === "email" && p.email === "-" ? "" : p[k]) || ""));
+  return (
+    <Modal title="환자 정보 편집" onClose={onClose} wide>
+      <div className="flex flex-col gap-3">
+        <div className="flex gap-2.5">
+          <Field label="이름" req><input value={f.name} onChange={(e) => set("name", e.target.value)} style={inpSm} /></Field>
+          <Field label="성별">
+            <div className="flex" style={{ gap: 5 }}>
+              {["남", "여"].map((g) => (
+                <button key={g} onClick={() => set("gender", g)} className="cursor-pointer"
+                  style={{ flex: 1, border: `1.5px solid ${f.gender === g ? C.primary : C.line}`, background: f.gender === g ? C.mint : "#fff", color: f.gender === g ? C.primary : C.sub, borderRadius: 9, padding: "8px 0", fontSize: 12.5, fontWeight: 700, fontFamily: FONT }}>{g}</button>
+              ))}
+            </div>
+          </Field>
+          <Field label="생년월일"><input type="date" value={f.birth} onChange={(e) => set("birth", e.target.value)} style={inpSm} /></Field>
+        </div>
+        <div className="flex gap-2.5">
+          <Field label="연락처" req><input value={f.phone} onChange={(e) => set("phone", e.target.value)} style={inpSm} /></Field>
+          <Field label="이메일"><input value={f.email} onChange={(e) => set("email", e.target.value)} placeholder="name@example.com" style={inpSm} /></Field>
+        </div>
+        <div className="flex gap-2.5">
+          <Field label="로그인 ID"><input value={f.loginId} onChange={(e) => set("loginId", e.target.value)} style={inpSm} /></Field>
+          <Field label="진단명"><input value={f.dx} onChange={(e) => set("dx", e.target.value)} style={inpSm} /></Field>
+        </div>
+        <div style={{ fontSize: 10.5, color: C.sub, lineHeight: 1.5, background: C.bg, borderRadius: 9, padding: "9px 11px" }}>
+          목표 안압은 <b style={{ color: C.primary }}>목표 안압 변경</b>에서, 기기 배정은 <b style={{ color: C.primary }}>기기</b> 탭에서 수정합니다. 변경 이력은 감사 로그에 기록됩니다.
+        </div>
+        <div className="flex gap-2.5" style={{ marginTop: 2 }}>
+          <button onClick={onClose} className="cursor-pointer" style={{ flex: 1, border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, fontFamily: FONT }}>취소</button>
+          <button onClick={() => ok && dirty && onSave({ ...f, email: f.email.trim() || "-" })} disabled={!ok || !dirty} className="cursor-pointer"
+            style={{ flex: 2, border: "none", background: ok && dirty ? C.primary : C.mintDeep, color: "#fff", borderRadius: 10, padding: "11px 0", fontSize: 13.5, fontWeight: 800, fontFamily: FONT }}>변경 저장</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------- 확인 대화상자 ---------- */
+function ConfirmModal({ title, icon: Ic, tone = "primary", lines, confirmText, onClose, onConfirm, done }) {
+  const c = tone === "danger" ? C.high : tone === "warn" ? C.mid : C.primary;
+  const bg = tone === "danger" ? C.highSoft : tone === "warn" ? C.midSoft : C.mint;
+  return (
+    <Modal title={title} onClose={onClose}>
+      {done ? (
+        <div className="flex flex-col items-center" style={{ padding: "18px 0 6px" }}>
+          <div className="flex items-center justify-center" style={{ width: 52, height: 52, borderRadius: 999, background: C.lowSoft, color: C.low, marginBottom: 12 }}><Check size={25} strokeWidth={3} /></div>
+          <div style={{ fontSize: 14.5, fontWeight: 800, color: C.ink, textAlign: "center" }}>{done}</div>
+          <button onClick={onClose} className="cursor-pointer" style={{ width: "100%", border: "none", background: C.primary, color: "#fff", borderRadius: 11, padding: "11px 0", fontSize: 13.5, fontWeight: 800, fontFamily: FONT, marginTop: 18 }}>확인</button>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start gap-3" style={{ padding: "12px 13px", borderRadius: 12, background: bg, marginBottom: 14 }}>
+            <div className="flex items-center justify-center flex-shrink-0" style={{ width: 36, height: 36, borderRadius: 11, background: "#fff", color: c }}><Ic size={18} /></div>
+            <div className="flex-1" style={{ fontSize: 12, color: C.ink, lineHeight: 1.6 }}>
+              {lines.map((l, i) => <div key={i} style={{ marginTop: i ? 5 : 0, color: i ? C.sub : C.ink, fontWeight: i ? 500 : 700, fontSize: i ? 11.5 : 12.5 }}>{l}</div>)}
+            </div>
+          </div>
+          <div className="flex gap-2.5">
+            <button onClick={onClose} className="cursor-pointer" style={{ flex: 1, border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, fontFamily: FONT }}>취소</button>
+            <button onClick={onConfirm} className="cursor-pointer" style={{ flex: 2, border: "none", background: c, color: "#fff", borderRadius: 10, padding: "11px 0", fontSize: 13.5, fontWeight: 800, fontFamily: FONT }}>{confirmText}</button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 /* ---------- 보고서 데이터 구성 · HTML/TEXT 렌더 ---------- */
 const REPORT_SECTIONS = [
   { id: "iop", t: "안압 측정 요약 · 그래프", on: true },
@@ -4963,7 +5040,8 @@ function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend, onU
   const [from, setFrom] = useState(RANGE_FROM_DEFAULT);
   const [to, setTo] = useState(RANGE_TO_DEFAULT);
   const [excluded, setExcluded] = useState({});
-  const [modal, setModal] = useState(null);        // "target" | "report"
+  const [modal, setModal] = useState(null);        // target | report | edit | pw | active | cert
+  const [sent2, setSent2] = useState("");
   const perm = CAN[role];
   const pts = period === "custom" ? trendDataRange(from, to) : trendData(period);
   const gmeta = GRAPH_TYPES.find((g) => g.id === gtype);
@@ -5225,6 +5303,37 @@ function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend, onU
       )}
       {modal === "report" && <ReportModal p={p} from={rFrom} to={rTo} onClose={() => setModal(null)} />}
 
+      {modal === "edit" && (
+        <EditPatientModal p={p} onClose={() => setModal(null)}
+          onSave={(v) => { onUpdatePatient && onUpdatePatient(p.id, v); toast && toast(`${v.name}님 정보를 수정했습니다.`); setModal(null); }} />
+      )}
+      {modal === "pw" && (
+        <ConfirmModal title="비밀번호 재설정 메일" icon={KeyRound} tone="primary" done={sent2}
+          lines={[`${p.name}님에게 재설정 링크를 보냅니다.`,
+                  p.email && p.email !== "-" ? `수신 주소 ${p.email} · 링크는 30분간 유효합니다.` : "등록된 이메일이 없어 연락처로 SMS 링크를 보냅니다.",
+                  "기존 비밀번호는 재설정 완료 시점에 폐기됩니다."]}
+          confirmText="메일 발송" onClose={() => { setModal(null); setSent2(""); }}
+          onConfirm={() => { setSent2(`${p.email && p.email !== "-" ? p.email : p.phone} 로 재설정 링크를 발송했습니다.`); toast && toast("비밀번호 재설정 링크를 발송했습니다."); }} />
+      )}
+      {modal === "active" && (
+        <ConfirmModal title={p.active ? "환자 비활성화" : "환자 활성화"} icon={p.active ? Lock : Check} tone={p.active ? "danger" : "primary"}
+          lines={p.active
+            ? [`${p.name}님을 비활성 상태로 전환합니다.`, "환자 목록에서 숨겨지고 새 측정 데이터가 수신되지 않습니다.", "기존 기록은 삭제되지 않으며 언제든 다시 활성화할 수 있습니다."]
+            : [`${p.name}님을 다시 활성화합니다.`, "환자 목록에 표시되고 측정 데이터 수신이 재개됩니다."]}
+          confirmText={p.active ? "비활성화" : "활성화"} onClose={() => setModal(null)}
+          onConfirm={() => { onUpdatePatient && onUpdatePatient(p.id, { active: !p.active });
+            toast && toast(`${p.name}님을 ${p.active ? "비활성화" : "활성화"}했습니다.`); setModal(null); }} />
+      )}
+      {modal === "cert" && (
+        <ConfirmModal title={p.certified ? "환자 인증 해제" : "환자 인증"} icon={ShieldCheck} tone={p.certified ? "warn" : "primary"}
+          lines={p.certified
+            ? [`${p.name}님의 인증을 해제합니다.`, "해제 후에는 측정·점안 데이터가 의료진 웹으로 수신되지 않습니다.", "환자 앱에는 기록이 계속 저장됩니다."]
+            : [`${p.name}님을 인증합니다.`, "인증 후 환자 앱의 측정·점안 기록이 이 기관으로 전달됩니다.", "환자 본인 확인을 마친 뒤 진행하세요."]}
+          confirmText={p.certified ? "인증 해제" : "인증하기"} onClose={() => setModal(null)}
+          onConfirm={() => { onUpdatePatient && onUpdatePatient(p.id, { certified: !p.certified });
+            toast && toast(`${p.name}님을 ${p.certified ? "인증 해제" : "인증"}했습니다.`); setModal(null); }} />
+      )}
+
       {tab === "profile" && (
         <div className="grid grid-cols-2" style={{ gap: 12 }}>
           {[
@@ -5242,10 +5351,10 @@ function PatientDetail({ p, role, onBack, devices, setDevices, sent, onSend, onU
             </div>
           ))}
           <div className="col-span-2 flex items-center gap-2" style={{ marginTop: 2 }}>
-            <button className="cursor-pointer flex items-center gap-1.5" style={{ border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: FONT }}><KeyRound size={13} /> 비밀번호 재설정 메일</button>
-            <button className="cursor-pointer" style={{ border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: FONT }}>정보 편집</button>
-            <button className="cursor-pointer" style={{ border: `1.5px solid ${C.high}40`, background: "#fff", color: C.high, borderRadius: 10, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: FONT }}>{p.active ? "비활성화" : "활성화"}</button>
-            <button className="cursor-pointer" style={{ border: "none", background: p.certified ? C.mintDeep : C.primary, color: p.certified ? C.primary : "#fff", borderRadius: 10, padding: "9px 14px", fontSize: 12.5, fontWeight: 800, fontFamily: FONT }}>{p.certified ? "인증 해제" : "환자 인증"}</button>
+            <button onClick={() => setModal("pw")} className="cursor-pointer flex items-center gap-1.5" style={{ border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: FONT }}><KeyRound size={13} /> 비밀번호 재설정 메일</button>
+            <button onClick={() => setModal("edit")} className="cursor-pointer" style={{ border: `1.5px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: FONT }}>정보 편집</button>
+            <button onClick={() => setModal("active")} className="cursor-pointer" style={{ border: `1.5px solid ${p.active ? C.high : C.low}40`, background: "#fff", color: p.active ? C.high : C.low, borderRadius: 10, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: FONT }}>{p.active ? "비활성화" : "활성화"}</button>
+            <button onClick={() => setModal("cert")} className="cursor-pointer" style={{ border: "none", background: p.certified ? C.mintDeep : C.primary, color: p.certified ? C.primary : "#fff", borderRadius: 10, padding: "9px 14px", fontSize: 12.5, fontWeight: 800, fontFamily: FONT }}>{p.certified ? "인증 해제" : "환자 인증"}</button>
           </div>
         </div>
       )}
